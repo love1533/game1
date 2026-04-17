@@ -161,12 +161,19 @@ export default function RankingPage() {
   const [listKey, setListKey] = useState(0);
 
   useEffect(() => {
-    const entries =
-      activeTab === "all"
-        ? getAllRankings()
-        : getGameRankings(activeTab);
-    setRankings(entries);
-    setListKey((k) => k + 1);
+    let cancelled = false;
+    const fetchRankings = async () => {
+      const entries =
+        activeTab === "all"
+          ? await getAllRankings()
+          : await getGameRankings(activeTab);
+      if (!cancelled) {
+        setRankings(entries);
+        setListKey((k) => k + 1);
+      }
+    };
+    fetchRankings();
+    return () => { cancelled = true; };
   }, [activeTab]);
 
   const tabs: { id: GameId; label: string; emoji: string }[] = [
