@@ -66,14 +66,6 @@ const games = [
     shadow: "shadow-yellow-100",
   },
   {
-    name: "우주탐험",
-    description: "슝슝~ 별들 사이를 날아다녀봐! 🌟",
-    href: "/games/space",
-    emoji: "🚀",
-    color: "from-indigo-200 to-violet-200",
-    shadow: "shadow-indigo-100",
-  },
-  {
     name: "리듬게임",
     description: "두둠칫~ 리듬에 맞춰 신나게 춰봐! 🎶",
     href: "/games/rhythm",
@@ -89,13 +81,38 @@ const games = [
     color: "from-red-200 to-rose-200",
     shadow: "shadow-red-100",
   },
+  {
+    name: "슈팅",
+    description: "펑펑! 적을 물리쳐라! 💥",
+    href: "/games/shooting",
+    emoji: "🔫",
+    color: "from-slate-200 to-blue-200",
+    shadow: "shadow-slate-100",
+  },
+  {
+    name: "블록쌓기",
+    description: "높이높이 쌓아올려봐! 🏗️",
+    href: "/games/tower",
+    emoji: "🧱",
+    color: "from-orange-200 to-red-200",
+    shadow: "shadow-orange-100",
+  },
+  {
+    name: "구슬굴리기",
+    description: "데굴데굴 굴려서 골인! 🎯",
+    href: "/games/marble",
+    emoji: "🔮",
+    color: "from-teal-200 to-cyan-200",
+    shadow: "shadow-teal-100",
+  },
 ];
 
 const characters = [
-  { name: "수현", emoji: "🧢", color: "bg-red-300", desc: "포켓몬 트레이너!" },
-  { name: "이현", emoji: "👸", color: "bg-pink-300", desc: "마법소녀 공주!" },
-  { name: "은영", emoji: "🌸", color: "bg-rose-300", desc: "꽃의 요정!" },
-  { name: "민구", emoji: "🏴‍☠️", color: "bg-amber-300", desc: "해적왕 모험가!" },
+  { name: "승민", emoji: "🤖", color: "bg-blue-300", desc: "AI과학자 꿈나무!" },
+  { name: "건우", emoji: "🩺", color: "bg-emerald-300", desc: "미래의 의사!" },
+  { name: "강우", emoji: "👨‍🍳", color: "bg-amber-300", desc: "요리왕 꿈나무!" },
+  { name: "수현", emoji: "💃", color: "bg-pink-300", desc: "13살 멋쟁이!" },
+  { name: "이현", emoji: "👸", color: "bg-rose-300", desc: "7살 공주님!" },
 ];
 
 const decorations = [
@@ -127,6 +144,10 @@ export default function Home() {
           0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.7; }
           50% { transform: translateY(-10px) rotate(15deg); opacity: 1; }
         }
+        @keyframes pulse-ranking {
+          0%, 100% { transform: scale(1); box-shadow: 0 4px 15px rgba(251,191,36,0.4); }
+          50% { transform: scale(1.04); box-shadow: 0 6px 20px rgba(251,191,36,0.7); }
+        }
         .title-bounce {
           animation: bounce-title 2.4s ease-in-out infinite;
           display: inline-block;
@@ -137,12 +158,16 @@ export default function Home() {
         .char-float:nth-child(2) { animation-delay: 0.3s; }
         .char-float:nth-child(3) { animation-delay: 0.6s; }
         .char-float:nth-child(4) { animation-delay: 0.9s; }
+        .char-float:nth-child(5) { animation-delay: 1.2s; }
         .deco-float {
           animation: float-deco 3s ease-in-out infinite;
           position: fixed;
           pointer-events: none;
           user-select: none;
           z-index: 0;
+        }
+        .ranking-pulse {
+          animation: pulse-ranking 2s ease-in-out infinite;
         }
       `}</style>
 
@@ -159,7 +184,7 @@ export default function Home() {
 
       <div className="min-h-screen flex flex-col items-center px-4 py-6 relative z-10">
         {/* Title */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-4">
           <h1 className="text-3xl font-extrabold text-purple-600 mb-1 tracking-tight">
             <span className="title-bounce inline-block">🎮 미니게임 월드</span>
           </h1>
@@ -170,6 +195,18 @@ export default function Home() {
             우리들의 신나는 게임 모음~! 🎵
           </p>
         </div>
+
+        {/* Ranking Button */}
+        <Link
+          href="/ranking"
+          className="ranking-pulse mb-5 inline-flex items-center gap-2 px-6 py-2.5 rounded-full
+            bg-gradient-to-r from-yellow-300 to-amber-400
+            text-white font-extrabold text-sm shadow-lg
+            border-2 border-yellow-200
+            active:scale-95 transition-transform duration-150"
+        >
+          🏆 랭킹 보기
+        </Link>
 
         {/* Characters */}
         <div className="flex gap-3 mb-7 flex-wrap justify-center">
@@ -222,9 +259,9 @@ export default function Home() {
         {/* Footer */}
         <div className="mt-8 text-center text-xs text-purple-300">
           <p className="font-semibold text-purple-400">
-            수현 · 이현 · 은영 · 민구
+            승민 · 건우 · 강우 · 수현 · 이현
           </p>
-          <p className="mt-0.5">❤️💗💖💛</p>
+          <p className="mt-0.5">💙💚🧡💗💖</p>
           <p className="mt-1 text-[10px] text-pink-300">
             오늘도 신나게 놀아요~! 🌟
           </p>

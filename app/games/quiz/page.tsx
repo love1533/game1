@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface Character {
@@ -40,10 +41,11 @@ type GamePhase = 'select' | 'playing' | 'result';
 
 // ─── Data ────────────────────────────────────────────────────────────
 const CHARACTERS: Character[] = [
-  { name: '수현', emoji: '🧢', color: '#E74C3C', heart: '❤️' },
-  { name: '이현', emoji: '👸', color: '#FF69B4', heart: '💗' },
-  { name: '은영', emoji: '🌸', color: '#FF6B9D', heart: '🌸' },
-  { name: '민구', emoji: '🏴‍☠️', color: '#F39C12', heart: '🧡' },
+  { name: '승민', emoji: '🤖', color: '#3B82F6', heart: '💙' },
+  { name: '건우', emoji: '🩺', color: '#10B981', heart: '💚' },
+  { name: '강우', emoji: '👨‍🍳', color: '#F59E0B', heart: '🧡' },
+  { name: '수현', emoji: '💃', color: '#EC4899', heart: '💗' },
+  { name: '이현', emoji: '👸', color: '#FF69B4', heart: '💖' },
 ];
 
 const QUESTIONS: Question[] = [
@@ -301,6 +303,7 @@ export default function QuizBattlePage() {
     if (next >= questions.length) {
       setPhase('result');
       if (timerRef.current) clearInterval(timerRef.current);
+      if (selectedChar >= 0) saveScore('quiz', CHARACTERS[selectedChar].name, score);
     } else {
       setCurrentQ(next);
       setAnswered(false);
@@ -309,7 +312,7 @@ export default function QuizBattlePage() {
       setFeedbackText('');
       startTimer();
     }
-  }, [currentQ, questions.length, startTimer]);
+  }, [currentQ, questions.length, startTimer, selectedChar, score]);
 
   // Start game
   const startGame = useCallback((charIndex: number) => {

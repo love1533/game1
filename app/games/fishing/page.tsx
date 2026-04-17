@@ -2,6 +2,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,10 +48,11 @@ interface FloatingText {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const CHARACTERS: Character[] = [
-  { name: '수현', color: '#E74C3C', emoji: '🧢', heart: '❤️' },
-  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💗' },
-  { name: '은영', color: '#FF6B9D', emoji: '🌸', heart: '🌸' },
-  { name: '민구', color: '#F39C12', emoji: '🏴‍☠️', heart: '🧡' },
+  { name: '승민', color: '#3B82F6', emoji: '🤖', heart: '💙' },
+  { name: '건우', color: '#10B981', emoji: '🩺', heart: '💚' },
+  { name: '강우', color: '#F59E0B', emoji: '👨‍🍳', heart: '🧡' },
+  { name: '수현', color: '#EC4899', emoji: '💃', heart: '💗' },
+  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💖' },
 ];
 
 const FISH_CATALOG: { type: FishType; pts: number; weight: number; label: string }[] = [
@@ -729,6 +731,7 @@ export default function FishingGame() {
           setFinalCombo(maxCombo);
           setFinalCaught(caught);
           setGameOver(true);
+          if (selectedChar !== null) saveScore('fishing', CHARACTERS[selectedChar].name, score);
           return;
         }
       }

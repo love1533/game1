@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Card {
@@ -30,10 +31,11 @@ interface ConfettiParticle {
 
 // ─── Characters ───────────────────────────────────────────────────────────────
 const CHARACTERS = [
-  { name: '수현', color: '#E74C3C', emoji: '🧢' },
+  { name: '승민', color: '#3B82F6', emoji: '🤖' },
+  { name: '건우', color: '#10B981', emoji: '🩺' },
+  { name: '강우', color: '#F59E0B', emoji: '👨‍🍳' },
+  { name: '수현', color: '#EC4899', emoji: '💃' },
   { name: '이현', color: '#FF69B4', emoji: '👸' },
-  { name: '은영', color: '#FF6B9D', emoji: '🌸' },
-  { name: '민구', color: '#F39C12', emoji: '🏴‍☠️' },
 ];
 
 const CARD_EMOJIS = ['🐰', '🐱', '🐻', '🦊', '🐼', '🐶'];
@@ -601,6 +603,8 @@ export default function MatchGame() {
                 // Check win
                 if (s.matchedPairs === 6) {
                   s.gameOver = true;
+                  const matchScore = Math.max(0, 10000 - s.moves * 80 - s.elapsed * 5);
+                  saveScore('match', CHARACTERS[s.winCharIdx].name, matchScore);
                   sound?.win();
                   spawnConfetti();
                   setTimeout(() => spawnConfetti(), 500);

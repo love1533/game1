@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -63,10 +64,11 @@ interface FloatingText {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const CHARACTERS: Character[] = [
-  { name: '수현', emoji: '🧢', color: '#E74C3C', heart: '❤️' },
-  { name: '이현', emoji: '👸', color: '#FF69B4', heart: '💗' },
-  { name: '은영', emoji: '🌸', color: '#FF6B9D', heart: '🌸' },
-  { name: '민구', emoji: '🏴‍☠️', color: '#F39C12', heart: '🧡' },
+  { name: '승민', emoji: '🤖', color: '#3B82F6', heart: '💙' },
+  { name: '건우', emoji: '🩺', color: '#10B981', heart: '💚' },
+  { name: '강우', emoji: '👨‍🍳', color: '#F59E0B', heart: '🧡' },
+  { name: '수현', emoji: '💃', color: '#EC4899', heart: '💗' },
+  { name: '이현', emoji: '👸', color: '#FF69B4', heart: '💖' },
 ];
 
 const GRAVITY = 0.45;
@@ -934,6 +936,7 @@ export default function RunnerGame() {
             const newHigh = Math.max(score, highScore);
             try { localStorage.setItem('runner-highscore', String(newHigh)); } catch { /* */ }
             setHighScore(newHigh);
+            if (selectedChar !== null) saveScore('runner', CHARACTERS[selectedChar].name, score);
             setFinalScore(score);
             setGameState('select');
           }

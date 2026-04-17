@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Character {
@@ -71,10 +72,11 @@ interface Confetti {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const CHARACTERS: Character[] = [
-  { name: '수현', color: '#E74C3C', emoji: '🧢', heart: '❤️' },
-  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💗' },
-  { name: '은영', color: '#FF6B9D', emoji: '🌸', heart: '🌸' },
-  { name: '민구', color: '#F39C12', emoji: '🏴‍☠️', heart: '🧡' },
+  { name: '승민', color: '#3B82F6', emoji: '🤖', heart: '💙' },
+  { name: '건우', color: '#10B981', emoji: '🩺', heart: '💚' },
+  { name: '강우', color: '#F59E0B', emoji: '👨‍🍳', heart: '🧡' },
+  { name: '수현', color: '#EC4899', emoji: '💃', heart: '💗' },
+  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💖' },
 ];
 
 const MARBLE_RADIUS = 14;
@@ -760,6 +762,7 @@ export default function MarblePage() {
       if (s.level >= s.levels.length - 1) {
         s.totalScore += s.score;
         s.phase = 'win';
+        saveScore('marble', s.character.name, s.totalScore);
         setPhase('win');
       } else {
         s.phase = 'levelComplete';

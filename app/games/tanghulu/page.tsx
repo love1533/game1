@@ -2,6 +2,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Character {
@@ -57,10 +58,11 @@ type Phase =
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CHARACTERS: Character[] = [
-  { name: '수현', color: '#E74C3C', emoji: '🧢', heart: '❤️', bgColor: '#FFEBEE' },
-  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💗', bgColor: '#FCE4EC' },
-  { name: '은영', color: '#FF6B9D', emoji: '🌸', heart: '🌸', bgColor: '#FFF0F5' },
-  { name: '민구', color: '#F39C12', emoji: '🏴‍☠️', heart: '🧡', bgColor: '#FFF8E1' },
+  { name: '승민', color: '#3B82F6', emoji: '🤖', heart: '💙', bgColor: '#EFF6FF' },
+  { name: '건우', color: '#10B981', emoji: '🩺', heart: '💚', bgColor: '#ECFDF5' },
+  { name: '강우', color: '#F59E0B', emoji: '👨‍🍳', heart: '🧡', bgColor: '#FFFBEB' },
+  { name: '수현', color: '#EC4899', emoji: '💃', heart: '💗', bgColor: '#FDF2F8' },
+  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💖', bgColor: '#FCE4EC' },
 ];
 
 const FRUIT_DEFS: FruitDef[] = [
@@ -393,7 +395,7 @@ export default function TanghuluPage() {
 
   const gs = useRef<GameState>({
     phase: 'select',
-    selectedChar: 1,
+    selectedChar: 4,
     skewered: [],
     syrupTemp: 0,
     stirPoints: [],
@@ -429,7 +431,7 @@ export default function TanghuluPage() {
   });
 
   const [uiPhase, setUiPhase] = useState<Phase>('select');
-  const [selectedChar, setSelectedChar] = useState(1);
+  const [selectedChar, setSelectedChar] = useState(4);
 
   const getAudio = useCallback(() => getAudioCtxSingleton(audioCtxRef), []);
 
@@ -507,6 +509,7 @@ export default function TanghuluPage() {
       charIdx: s.selectedChar,
       coating: s.coatingRating,
     });
+    saveScore('tanghulu', CHARACTERS[s.selectedChar].name, s.stars);
     goToPhase('complete');
   }, [getAudio, computeRating, goToPhase]);
 
@@ -2288,7 +2291,7 @@ export default function TanghuluPage() {
           }}>
             {CHARACTERS.map((char, i) => {
               const isSelected = selectedChar === i;
-              const isIhyeon = i === 1;
+              const isIhyeon = i === 4;
               return (
                 <div
                   key={char.name}

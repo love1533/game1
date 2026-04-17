@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { saveScore } from '@/lib/ranking';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Character {
@@ -55,10 +56,11 @@ type GamePhase = 'select' | 'playing' | 'reaction' | 'gameover';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CHARACTERS: Character[] = [
-  { name: '수현', color: '#E74C3C', emoji: '🧢', heart: '❤️' },
-  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💗' },
-  { name: '은영', color: '#FF6B9D', emoji: '🌸', heart: '🌸' },
-  { name: '민구', color: '#F39C12', emoji: '🏴‍☠️', heart: '🧡' },
+  { name: '승민', color: '#3B82F6', emoji: '🤖', heart: '💙' },
+  { name: '건우', color: '#10B981', emoji: '🩺', heart: '💚' },
+  { name: '강우', color: '#F59E0B', emoji: '👨‍🍳', heart: '🧡' },
+  { name: '수현', color: '#EC4899', emoji: '💃', heart: '💗' },
+  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💖' },
 ];
 
 const RECIPES: Recipe[] = [
@@ -237,6 +239,7 @@ export default function CookingPage() {
           setHearts(h => {
             const next = h - 1;
             if (next <= 0) {
+              saveScore('cooking', CHARACTERS[selectedChar].name, scoreRef.current);
               setPhase('gameover');
             }
             return Math.max(next, 0);
@@ -246,6 +249,7 @@ export default function CookingPage() {
           setTimeout(() => {
             const ri = recipeIdxRef.current + 1;
             if (ri >= RECIPES.length || heartsRef.current <= 0) {
+              saveScore('cooking', CHARACTERS[selectedChar].name, scoreRef.current);
               setPhase('gameover');
             } else {
               setRecipeIdx(ri);
@@ -332,7 +336,7 @@ export default function CookingPage() {
 
         const nextRi = ri + 1;
         if (nextRi >= RECIPES.length || heartsRef.current <= 0) {
-          setTimeout(() => setPhase('gameover'), 1800);
+          setTimeout(() => { saveScore('cooking', CHARACTERS[selectedChar].name, scoreRef.current); setPhase('gameover'); }, 1800);
         } else {
           setReactionMsg(getReactionMsg(true));
           setTimeout(() => {
@@ -356,7 +360,7 @@ export default function CookingPage() {
       addFloatingText('틀렸어! 💦', btnX, btnY - 20, '#FB7185');
       if (newHearts <= 0) {
         clearTimer();
-        setTimeout(() => setPhase('gameover'), 800);
+        setTimeout(() => { saveScore('cooking', CHARACTERS[selectedChar].name, scoreRef.current); setPhase('gameover'); }, 800);
       }
     }
   }, [ensureAudio, addSparkles, addFloatingText, clearTimer, startTimer]);
