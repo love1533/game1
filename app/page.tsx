@@ -1,65 +1,108 @@
-import Image from "next/image";
+import Link from "next/link";
+
+const games = [
+  {
+    name: "점프점프",
+    description: "끝없이 올라가자! 🚀",
+    href: "/games/jump",
+    emoji: "🦘",
+    color: "from-purple-400 to-pink-400",
+    shadow: "shadow-purple-200",
+  },
+  {
+    name: "캐릭터 달리기",
+    description: "장애물을 피해 달려! 🏃‍♀️",
+    href: "/games/runner",
+    emoji: "💨",
+    color: "from-blue-400 to-cyan-400",
+    shadow: "shadow-blue-200",
+  },
+  {
+    name: "짝맞추기",
+    description: "같은 카드를 찾아라! 🃏",
+    href: "/games/match",
+    emoji: "🎴",
+    color: "from-pink-400 to-rose-400",
+    shadow: "shadow-pink-200",
+  },
+  {
+    name: "퀴즈 대결",
+    description: "OX 퀴즈에 도전! 🧠",
+    href: "/games/quiz",
+    emoji: "❓",
+    color: "from-amber-400 to-orange-400",
+    shadow: "shadow-amber-200",
+  },
+  {
+    name: "꾸미기",
+    description: "캐릭터를 예쁘게! 👗",
+    href: "/games/dress",
+    emoji: "✨",
+    color: "from-green-400 to-emerald-400",
+    shadow: "shadow-green-200",
+  },
+];
+
+const characters = [
+  { name: "수현", emoji: "😎", color: "bg-purple-400", desc: "용감한 리더!" },
+  { name: "이현", emoji: "🤓", color: "bg-blue-400", desc: "똑똑한 두뇌파!" },
+  { name: "은영", emoji: "🥰", color: "bg-pink-400", desc: "다정한 힐러!" },
+  { name: "민구", emoji: "😜", color: "bg-green-400", desc: "장난꾸러기!" },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen flex flex-col items-center px-4 py-6">
+      {/* Title */}
+      <div className="text-center mb-6">
+        <h1 className="text-3xl font-bold text-purple-700 mb-1">
+          🎮 미니게임 월드
+        </h1>
+        <p className="text-sm text-purple-500">우리들의 신나는 게임 모음!</p>
+      </div>
+
+      {/* Characters */}
+      <div className="flex gap-3 mb-6">
+        {characters.map((char) => (
+          <div key={char.name} className="flex flex-col items-center">
+            <div
+              className={`w-14 h-14 ${char.color} rounded-full flex items-center justify-center text-2xl shadow-lg`}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+              {char.emoji}
+            </div>
+            <span className="text-xs font-bold text-gray-700 mt-1">
+              {char.name}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Game Cards */}
+      <div className="w-full max-w-sm flex flex-col gap-3">
+        {games.map((game) => (
+          <Link
+            key={game.name}
+            href={game.href}
+            className={`block rounded-2xl bg-gradient-to-r ${game.color} p-4 shadow-lg ${game.shadow}
+              transform transition-all duration-200 active:scale-95 hover:scale-[1.02]`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+            <div className="flex items-center gap-3">
+              <span className="text-4xl">{game.emoji}</span>
+              <div>
+                <h2 className="text-lg font-bold text-white">{game.name}</h2>
+                <p className="text-sm text-white/80">{game.description}</p>
+              </div>
+              <span className="ml-auto text-2xl text-white/60">▶</span>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div className="mt-6 text-center text-xs text-purple-400">
+        <p>수현 · 이현 · 은영 · 민구</p>
+        <p>💜💙💗💚</p>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest:*)",
+      "Bash(cp -r /Users/mingukim/work/home-play/game1-temp/* /Users/mingukim/work/home-play/game1/)",
+      "Bash(cp -r /Users/mingukim/work/home-play/game1-temp/.* /Users/mingukim/work/home-play/game1/)",
+      "Bash(rm -rf /Users/mingukim/work/home-play/game1-temp)",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git init:*)",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
+    ]
+  }
+}
