@@ -2,7 +2,6 @@ import {
   collection,
   addDoc,
   query,
-  where,
   orderBy,
   limit,
   getDocs,
@@ -13,19 +12,21 @@ import { db } from "./firebase";
 export interface ScoreEntry {
   playerName: string;
   score: number;
-  date: string; // ISO date string
+  date: string;
   gameId: string;
 }
 
 const COLLECTION = "rankings";
 
-// ── Save: write to Firestore (fire-and-forget) + localStorage backup ──────────
+// ── Save ─────────────────────────────────────────────────────────────────────
 
 export function saveScore(
   gameId: string,
   playerName: string,
   score: number
 ): void {
+  if (score <= 0) return;
+
   const entry: ScoreEntry = {
     playerName,
     score,
@@ -33,38 +34,47 @@ export function saveScore(
     gameId,
   };
 
-  // 1) Firestore (async, fire-and-forget – never blocks the game)
+  // Firestore (fire-and-forget)
   addDoc(collection(db, COLLECTION), {
     ...entry,
     createdAt: serverTimestamp(),
-  }).catch((err) => console.warn("Firestore save failed:", err));
+  })
+    .then(() => console.log("✅ Score saved to Firestore:", gameId, playerName, score))
+    .catch((err) => console.error("❌ Firestore save failed:", err));
 
-  // 2) localStorage fallback (keeps working offline)
+  // localStorage backup
   _localSave(entry);
 }
 
-// ── Read: always from Firestore (async) ───────────────────────────────────────
+// ── Read (simple queries - no composite index needed) ────────────────────────
 
 export async function getGameRankings(gameId: string): Promise<ScoreEntry[]> {
   try {
+    // Fetch all, filter client-side (avoids composite index requirement)
     const q = query(
       collection(db, COLLECTION),
-      where("gameId", "==", gameId),
       orderBy("score", "desc"),
-      limit(10)
+      limit(200)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        playerName: data.playerName,
-        score: data.score,
-        date: data.date,
-        gameId: data.gameId,
-      } as ScoreEntry;
-    });
+    const entries: ScoreEntry[] = [];
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      if (d.gameId === gameId) {
+        entries.push({
+          playerName: d.playerName,
+          score: d.score,
+          date: d.date,
+          gameId: d.gameId,
+        });
+      }
+      if (entries.length >= 10) break;
+    }
+    // If Firestore returned results, use them; otherwise fall back
+    if (snap.docs.length > 0) return entries;
+    return _localGetGame(gameId);
   } catch (err) {
-    console.warn("Firestore read failed, falling back to localStorage:", err);
+    console.error("❌ Firestore read failed:", err);
     return _localGetGame(gameId);
   }
 }
@@ -77,17 +87,20 @@ export async function getAllRankings(): Promise<ScoreEntry[]> {
       limit(50)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        playerName: data.playerName,
-        score: data.score,
-        date: data.date,
-        gameId: data.gameId,
-      } as ScoreEntry;
-    });
+    if (snap.docs.length > 0) {
+      return snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          playerName: data.playerName,
+          score: data.score,
+          date: data.date,
+          gameId: data.gameId,
+        } as ScoreEntry;
+      });
+    }
+    return _localGetAll();
   } catch (err) {
-    console.warn("Firestore read failed, falling back to localStorage:", err);
+    console.error("❌ Firestore read failed:", err);
     return _localGetAll();
   }
 }
@@ -98,21 +111,23 @@ export async function getPlayerBest(
   try {
     const q = query(
       collection(db, COLLECTION),
-      where("playerName", "==", playerName),
       orderBy("score", "desc"),
-      limit(200)
+      limit(500)
     );
     const snap = await getDocs(q);
     const best: Record<string, number> = {};
     for (const doc of snap.docs) {
       const d = doc.data();
-      if (!(d.gameId in best) || d.score > best[d.gameId]) {
-        best[d.gameId] = d.score;
+      if (d.playerName === playerName) {
+        if (!(d.gameId in best) || d.score > best[d.gameId]) {
+          best[d.gameId] = d.score;
+        }
       }
     }
-    return best;
+    if (snap.docs.length > 0) return best;
+    return _localGetPlayerBest(playerName);
   } catch (err) {
-    console.warn("Firestore read failed, falling back to localStorage:", err);
+    console.error("❌ Firestore read failed:", err);
     return _localGetPlayerBest(playerName);
   }
 }
@@ -120,10 +135,9 @@ export async function getPlayerBest(
 export function clearRankings(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem("game-rankings");
-  // NOTE: Firestore clear requires admin SDK – skip for now
 }
 
-// ── localStorage helpers (offline fallback) ───────────────────────────────────
+// ── localStorage helpers ─────────────────────────────────────────────────────
 
 const STORAGE_KEY = "game-rankings";
 const MAX_PER_GAME = 100;
@@ -143,9 +157,7 @@ function _localSaveAll(entries: ScoreEntry[]): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-  } catch {
-    /* ignore */
-  }
+  } catch { /* */ }
 }
 
 function _localSave(entry: ScoreEntry): void {
