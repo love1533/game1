@@ -118,6 +118,15 @@ const games = [
     shadow: "shadow-teal-100",
     preview: "🔮💫🎯",
   },
+  {
+    name: "방탈출",
+    description: "으스스한 저택에서 친구를 구하라! 👻",
+    href: "/games/escape",
+    emoji: "🏚️",
+    color: "from-gray-300 to-purple-200",
+    shadow: "shadow-gray-200",
+    preview: "🏚️🔦👻",
+  },
 ];
 
 const characters = [
