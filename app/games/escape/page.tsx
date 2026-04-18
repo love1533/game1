@@ -948,7 +948,7 @@ function GameScene({
   return (
     <>
       <fog attach="fog" args={['#1a0a2e', 2, 15]} />
-      <ambientLight intensity={0.08} color="#441122" />
+      <ambientLight intensity={0.15} color="#441122" />
 
       {gs.current.hasFlashlight && (
         <spotLight
@@ -1076,6 +1076,9 @@ function makeInitialGameState(): GameState {
 }
 
 export default function EscapePage() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const [screen, setScreen] = useState<'select' | 'intro' | 'playing' | 'victory'>('select');
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [dialogText, setDialogText] = useState('');
@@ -1665,20 +1668,22 @@ export default function EscapePage() {
     <div style={{ width: '100vw', height: '100vh', background: '#000', position: 'relative', overflow: 'hidden' }}>
       {/* 3D Canvas */}
       <div ref={canvasContainerRef} style={{ width: '100%', height: '100%' }}>
-        <Canvas
-          camera={{ fov: 75, near: 0.1, far: 100, position: [0, 1.6, 4] }}
-          gl={{ antialias: true }}
-        >
-          <GameScene
-            gs={gsRef}
-            inputRef={inputRef}
-            audioRef={audioRef}
-            onCaught={handleCaught}
-            onInteract={handleInteract}
-            onStageComplete={advanceStage}
-          />
-          <CameraSpotlight gs={gsRef} />
-        </Canvas>
+        {mounted && (
+          <Canvas
+            camera={{ fov: 75, near: 0.1, far: 100, position: [0, 1.6, 4] }}
+            gl={{ antialias: true }}
+          >
+            <GameScene
+              gs={gsRef}
+              inputRef={inputRef}
+              audioRef={audioRef}
+              onCaught={handleCaught}
+              onInteract={handleInteract}
+              onStageComplete={advanceStage}
+            />
+            <CameraSpotlight gs={gsRef} />
+          </Canvas>
+        )}
       </div>
 
       {/* Crosshair */}

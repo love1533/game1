@@ -6,26 +6,15 @@ const games = [
     description: "폴짝폴짝! 하늘까지 올라가자~ 🌙",
     href: "/games/jump",
     emoji: "🐰",
-    color: "from-purple-200 to-pink-200",
-    shadow: "shadow-purple-100",
+    color: "from-purple-300 to-pink-300",
     preview: "🐰⬆️☁️",
-  },
-  {
-    name: "캐릭터 달리기",
-    description: "냥냥~ 장애물을 훌쩍 넘어라! 🍀",
-    href: "/games/runner",
-    emoji: "🐱",
-    color: "from-blue-200 to-cyan-200",
-    shadow: "shadow-blue-100",
-    preview: "🐱💨🪨",
   },
   {
     name: "짝맞추기",
     description: "어디 있을까? 짝꿍을 찾아줘! 🌸",
     href: "/games/match",
     emoji: "🐻",
-    color: "from-pink-200 to-rose-200",
-    shadow: "shadow-pink-100",
+    color: "from-pink-300 to-rose-300",
     preview: "🐻❓🃏",
   },
   {
@@ -33,8 +22,7 @@ const games = [
     description: "오! 정답은 뭘까? 같이 맞혀봐~ 💡",
     href: "/games/quiz",
     emoji: "🦊",
-    color: "from-amber-200 to-orange-200",
-    shadow: "shadow-amber-100",
+    color: "from-amber-300 to-orange-300",
     preview: "🦊💡❓",
   },
   {
@@ -42,26 +30,15 @@ const games = [
     description: "반짝반짝~ 나만의 스타일로 꾸며봐! 🎀",
     href: "/games/dress",
     emoji: "🐼",
-    color: "from-green-200 to-emerald-200",
-    shadow: "shadow-green-100",
+    color: "from-green-300 to-emerald-300",
     preview: "🐼👗✨",
-  },
-  {
-    name: "낚시왕",
-    description: "찰랑찰랑~ 물고기를 낚아올려라! 🌊",
-    href: "/games/fishing",
-    emoji: "🎣",
-    color: "from-sky-200 to-blue-200",
-    shadow: "shadow-sky-100",
-    preview: "🎣🐟🌊",
   },
   {
     name: "버블팝",
     description: "팡팡팡! 방울을 터뜨려봐! ✨",
     href: "/games/bubble",
     emoji: "🫧",
-    color: "from-violet-200 to-purple-200",
-    shadow: "shadow-violet-100",
+    color: "from-violet-300 to-purple-300",
     preview: "🫧💥🌈",
   },
   {
@@ -69,8 +46,7 @@ const games = [
     description: "냠냠~ 맛있는 요리를 만들어봐! 🍽️",
     href: "/games/cooking",
     emoji: "🍳",
-    color: "from-yellow-200 to-amber-200",
-    shadow: "shadow-yellow-100",
+    color: "from-yellow-300 to-amber-300",
     preview: "🍳🥕🍽️",
   },
   {
@@ -78,8 +54,7 @@ const games = [
     description: "두둠칫~ 리듬에 맞춰 신나게 춰봐! 🎶",
     href: "/games/rhythm",
     emoji: "🎵",
-    color: "from-fuchsia-200 to-pink-200",
-    shadow: "shadow-fuchsia-100",
+    color: "from-fuchsia-300 to-pink-300",
     preview: "🎵🥁🎶",
   },
   {
@@ -87,8 +62,7 @@ const games = [
     description: "달콤달콤~ 예쁜 탕후루를 만들어봐! 🍬",
     href: "/games/tanghulu",
     emoji: "🍡",
-    color: "from-red-200 to-rose-200",
-    shadow: "shadow-red-100",
+    color: "from-red-300 to-rose-300",
     preview: "🍡🍓🍬",
   },
   {
@@ -96,8 +70,7 @@ const games = [
     description: "펑펑! 적을 물리쳐라! 💥",
     href: "/games/shooting",
     emoji: "🔫",
-    color: "from-slate-200 to-blue-200",
-    shadow: "shadow-slate-100",
+    color: "from-slate-300 to-blue-300",
     preview: "🚀💥👾",
   },
   {
@@ -105,38 +78,27 @@ const games = [
     description: "높이높이 쌓아올려봐! 🏗️",
     href: "/games/tower",
     emoji: "🧱",
-    color: "from-orange-200 to-red-200",
-    shadow: "shadow-orange-100",
+    color: "from-orange-300 to-red-300",
     preview: "🧱🏗️⬆️",
-  },
-  {
-    name: "구슬굴리기",
-    description: "데굴데굴 굴려서 골인! 🎯",
-    href: "/games/marble",
-    emoji: "🔮",
-    color: "from-teal-200 to-cyan-200",
-    shadow: "shadow-teal-100",
-    preview: "🔮💫🎯",
   },
   {
     name: "방탈출",
     description: "으스스한 저택에서 친구를 구하라! 👻",
     href: "/games/escape",
     emoji: "🏚️",
-    color: "from-gray-300 to-purple-200",
-    shadow: "shadow-gray-200",
+    color: "from-gray-400 to-purple-300",
     preview: "🏚️🔦👻",
   },
 ];
 
 const characters = [
-  { name: "승민", emoji: "🤖", color: "bg-blue-300", desc: "AI과학자 꿈나무!" },
-  { name: "건우", emoji: "🩺", color: "bg-emerald-300", desc: "미래의 의사!" },
-  { name: "강우", emoji: "👨‍🍳", color: "bg-amber-300", desc: "요리왕 꿈나무!" },
-  { name: "수현", emoji: "💃", color: "bg-pink-300", desc: "13살 멋쟁이!" },
-  { name: "이현", emoji: "👸", color: "bg-rose-300", desc: "7살 공주님!" },
-  { name: "준영", emoji: "📚", color: "bg-indigo-300", desc: "고1 우등생!" },
-  { name: "준우", emoji: "✈️", color: "bg-sky-300", desc: "공사 꿈나무!" },
+  { name: "승민", emoji: "🤖", color: "bg-blue-300" },
+  { name: "건우", emoji: "🩺", color: "bg-emerald-300" },
+  { name: "강우", emoji: "👨‍🍳", color: "bg-amber-300" },
+  { name: "수현", emoji: "💃", color: "bg-pink-300" },
+  { name: "이현", emoji: "👸", color: "bg-rose-300" },
+  { name: "준영", emoji: "📚", color: "bg-indigo-300" },
+  { name: "준우", emoji: "✈️", color: "bg-sky-300" },
 ];
 
 const decorations = [
@@ -209,7 +171,7 @@ export default function Home() {
       <div className="min-h-screen flex flex-col items-center px-4 py-6 relative z-10">
         {/* Title */}
         <div className="text-center mb-4">
-          <h1 className="text-3xl font-extrabold text-purple-600 mb-1 tracking-tight">
+          <h1 className="text-4xl font-extrabold text-purple-600 mb-1 tracking-tight">
             <span className="title-bounce inline-block">🎮 미니게임월드</span>
           </h1>
           <p className="text-sm font-semibold text-pink-400 mt-1">
@@ -233,7 +195,7 @@ export default function Home() {
         </Link>
 
         {/* Characters */}
-        <div className="flex gap-3 mb-7 flex-wrap justify-center">
+        <div className="flex gap-2 mb-7 flex-wrap justify-center">
           {characters.map((char, i) => (
             <div
               key={char.name}
@@ -241,15 +203,12 @@ export default function Home() {
               style={{ animationDelay: `${i * 0.3}s` }}
             >
               <div
-                className={`w-14 h-14 ${char.color} rounded-full flex items-center justify-center text-2xl shadow-md border-2 border-white`}
+                className={`w-11 h-11 ${char.color} rounded-full flex items-center justify-center text-xl shadow-md border-2 border-white`}
               >
                 {char.emoji}
               </div>
-              <span className="text-xs font-bold text-gray-600 mt-1">
+              <span className="text-[10px] font-bold text-gray-600 mt-1">
                 {char.name}
-              </span>
-              <span className="text-[9px] text-gray-400 text-center leading-tight max-w-[56px]">
-                {char.desc}
               </span>
             </div>
           ))}
@@ -261,7 +220,7 @@ export default function Home() {
             <Link
               key={game.name}
               href={game.href}
-              className={`block rounded-2xl bg-gradient-to-br ${game.color} p-3 shadow-lg ${game.shadow}
+              className={`block rounded-2xl bg-gradient-to-br ${game.color} p-4 shadow-lg
                 border border-white/60
                 transform transition-all duration-200 active:scale-95 hover:scale-[1.03] hover:shadow-xl`}
             >
@@ -272,10 +231,10 @@ export default function Home() {
                 <span className="text-3xl drop-shadow-sm leading-none">
                   {game.emoji}
                 </span>
-                <h2 className="text-xs font-extrabold text-gray-700 leading-tight mt-0.5">
+                <h2 className="text-xs font-extrabold text-white drop-shadow leading-tight mt-0.5">
                   {game.name}
                 </h2>
-                <p className="text-[9px] text-gray-500 leading-tight line-clamp-2">
+                <p className="text-[9px] text-white/90 drop-shadow leading-tight line-clamp-2">
                   {game.description}
                 </p>
               </div>

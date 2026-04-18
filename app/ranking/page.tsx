@@ -11,18 +11,15 @@ import {
 // ── Game metadata ──────────────────────────────────────────────────────────────
 const GAMES = [
   { id: "jump", label: "점프점프", emoji: "🐰" },
-  { id: "runner", label: "달리기", emoji: "🐱" },
   { id: "match", label: "짝맞추기", emoji: "🐻" },
   { id: "quiz", label: "퀴즈", emoji: "🦊" },
   { id: "dress", label: "꾸미기", emoji: "🐼" },
-  { id: "fishing", label: "낚시왕", emoji: "🎣" },
   { id: "bubble", label: "버블팝", emoji: "🫧" },
   { id: "cooking", label: "요리사", emoji: "🍳" },
   { id: "rhythm", label: "리듬게임", emoji: "🎵" },
   { id: "tanghulu", label: "탕후루", emoji: "🍡" },
-  { id: "tower", label: "블록쌓기", emoji: "🧱" },
-  { id: "marble", label: "구슬굴리기", emoji: "🔮" },
   { id: "shooting", label: "슈팅", emoji: "🚀" },
+  { id: "tower", label: "블록쌓기", emoji: "🧱" },
   { id: "escape", label: "방탈출", emoji: "🏚️" },
 ] as const;
 
