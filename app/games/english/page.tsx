@@ -65,7 +65,7 @@ const CHARACTERS: Character[] = [
 ];
 
 const WORDS: WordEntry[] = [
-  // Animals
+  // Animals (15)
   { korean: '강아지', english: 'Dog', emoji: '🐶', category: '동물' },
   { korean: '고양이', english: 'Cat', emoji: '🐱', category: '동물' },
   { korean: '새', english: 'Bird', emoji: '🐦', category: '동물' },
@@ -76,7 +76,12 @@ const WORDS: WordEntry[] = [
   { korean: '코끼리', english: 'Elephant', emoji: '🐘', category: '동물' },
   { korean: '원숭이', english: 'Monkey', emoji: '🐵', category: '동물' },
   { korean: '호랑이', english: 'Tiger', emoji: '🐯', category: '동물' },
-  // Fruits
+  { korean: '기린', english: 'Giraffe', emoji: '🦒', category: '동물' },
+  { korean: '펭귄', english: 'Penguin', emoji: '🐧', category: '동물' },
+  { korean: '돌고래', english: 'Dolphin', emoji: '🐬', category: '동물' },
+  { korean: '거북이', english: 'Turtle', emoji: '🐢', category: '동물' },
+  { korean: '나비', english: 'Butterfly', emoji: '🦋', category: '동물' },
+  // Fruits (10)
   { korean: '사과', english: 'Apple', emoji: '🍎', category: '과일' },
   { korean: '바나나', english: 'Banana', emoji: '🍌', category: '과일' },
   { korean: '오렌지', english: 'Orange', emoji: '🍊', category: '과일' },
@@ -85,7 +90,9 @@ const WORDS: WordEntry[] = [
   { korean: '수박', english: 'Watermelon', emoji: '🍉', category: '과일' },
   { korean: '복숭아', english: 'Peach', emoji: '🍑', category: '과일' },
   { korean: '체리', english: 'Cherry', emoji: '🍒', category: '과일' },
-  // Food
+  { korean: '레몬', english: 'Lemon', emoji: '🍋', category: '과일' },
+  { korean: '망고', english: 'Mango', emoji: '🥭', category: '과일' },
+  // Food (12)
   { korean: '밥', english: 'Rice', emoji: '🍚', category: '음식' },
   { korean: '빵', english: 'Bread', emoji: '🍞', category: '음식' },
   { korean: '달걀', english: 'Egg', emoji: '🥚', category: '음식' },
@@ -94,7 +101,11 @@ const WORDS: WordEntry[] = [
   { korean: '케이크', english: 'Cake', emoji: '🎂', category: '음식' },
   { korean: '쿠키', english: 'Cookie', emoji: '🍪', category: '음식' },
   { korean: '아이스크림', english: 'Ice Cream', emoji: '🍦', category: '음식' },
-  // Colors
+  { korean: '치킨', english: 'Chicken', emoji: '🍗', category: '음식' },
+  { korean: '햄버거', english: 'Hamburger', emoji: '🍔', category: '음식' },
+  { korean: '국수', english: 'Noodle', emoji: '🍜', category: '음식' },
+  { korean: '치즈', english: 'Cheese', emoji: '🧀', category: '음식' },
+  // Colors (8)
   { korean: '빨강', english: 'Red', emoji: '❤️', category: '색깔' },
   { korean: '파랑', english: 'Blue', emoji: '💙', category: '색깔' },
   { korean: '초록', english: 'Green', emoji: '💚', category: '색깔' },
@@ -103,14 +114,18 @@ const WORDS: WordEntry[] = [
   { korean: '보라', english: 'Purple', emoji: '💜', category: '색깔' },
   { korean: '하양', english: 'White', emoji: '⬜', category: '색깔' },
   { korean: '검정', english: 'Black', emoji: '⬛', category: '색깔' },
-  // Body
+  // Body (10)
   { korean: '눈', english: 'Eye', emoji: '👁️', category: '신체' },
   { korean: '코', english: 'Nose', emoji: '👃', category: '신체' },
   { korean: '입', english: 'Mouth', emoji: '👄', category: '신체' },
   { korean: '귀', english: 'Ear', emoji: '👂', category: '신체' },
   { korean: '손', english: 'Hand', emoji: '✋', category: '신체' },
   { korean: '발', english: 'Foot', emoji: '🦶', category: '신체' },
-  // Family
+  { korean: '머리', english: 'Head', emoji: '🗣️', category: '신체' },
+  { korean: '어깨', english: 'Shoulder', emoji: '💪', category: '신체' },
+  { korean: '무릎', english: 'Knee', emoji: '🦵', category: '신체' },
+  { korean: '이빨', english: 'Tooth', emoji: '🦷', category: '신체' },
+  // Family (7)
   { korean: '엄마', english: 'Mom', emoji: '👩', category: '가족' },
   { korean: '아빠', english: 'Dad', emoji: '👨', category: '가족' },
   { korean: '언니/누나', english: 'Sister', emoji: '👧', category: '가족' },
@@ -118,18 +133,57 @@ const WORDS: WordEntry[] = [
   { korean: '아기', english: 'Baby', emoji: '👶', category: '가족' },
   { korean: '할머니', english: 'Grandma', emoji: '👵', category: '가족' },
   { korean: '할아버지', english: 'Grandpa', emoji: '👴', category: '가족' },
-  // Numbers
+  // Numbers (10)
   { korean: '하나', english: 'One', emoji: '1️⃣', category: '숫자' },
   { korean: '둘', english: 'Two', emoji: '2️⃣', category: '숫자' },
   { korean: '셋', english: 'Three', emoji: '3️⃣', category: '숫자' },
   { korean: '넷', english: 'Four', emoji: '4️⃣', category: '숫자' },
   { korean: '다섯', english: 'Five', emoji: '5️⃣', category: '숫자' },
-  // School
+  { korean: '여섯', english: 'Six', emoji: '6️⃣', category: '숫자' },
+  { korean: '일곱', english: 'Seven', emoji: '7️⃣', category: '숫자' },
+  { korean: '여덟', english: 'Eight', emoji: '8️⃣', category: '숫자' },
+  { korean: '아홉', english: 'Nine', emoji: '9️⃣', category: '숫자' },
+  { korean: '열', english: 'Ten', emoji: '🔟', category: '숫자' },
+  // School (8)
   { korean: '책', english: 'Book', emoji: '📚', category: '학교' },
   { korean: '연필', english: 'Pencil', emoji: '✏️', category: '학교' },
   { korean: '책상', english: 'Desk', emoji: '🪑', category: '학교' },
   { korean: '선생님', english: 'Teacher', emoji: '👩‍🏫', category: '학교' },
   { korean: '학생', english: 'Student', emoji: '🧑‍🎓', category: '학교' },
+  { korean: '학교', english: 'School', emoji: '🏫', category: '학교' },
+  { korean: '가방', english: 'Bag', emoji: '🎒', category: '학교' },
+  { korean: '지우개', english: 'Eraser', emoji: '🧹', category: '학교' },
+  // Nature (10)
+  { korean: '태양', english: 'Sun', emoji: '☀️', category: '자연' },
+  { korean: '달', english: 'Moon', emoji: '🌙', category: '자연' },
+  { korean: '별', english: 'Star', emoji: '⭐', category: '자연' },
+  { korean: '구름', english: 'Cloud', emoji: '☁️', category: '자연' },
+  { korean: '비', english: 'Rain', emoji: '🌧️', category: '자연' },
+  { korean: '눈(날씨)', english: 'Snow', emoji: '❄️', category: '자연' },
+  { korean: '꽃', english: 'Flower', emoji: '🌸', category: '자연' },
+  { korean: '나무', english: 'Tree', emoji: '🌳', category: '자연' },
+  { korean: '산', english: 'Mountain', emoji: '⛰️', category: '자연' },
+  { korean: '바다', english: 'Sea', emoji: '🌊', category: '자연' },
+  // Transportation (8)
+  { korean: '자동차', english: 'Car', emoji: '🚗', category: '탈것' },
+  { korean: '버스', english: 'Bus', emoji: '🚌', category: '탈것' },
+  { korean: '비행기', english: 'Airplane', emoji: '✈️', category: '탈것' },
+  { korean: '배', english: 'Ship', emoji: '🚢', category: '탈것' },
+  { korean: '자전거', english: 'Bicycle', emoji: '🚲', category: '탈것' },
+  { korean: '기차', english: 'Train', emoji: '🚂', category: '탈것' },
+  { korean: '택시', english: 'Taxi', emoji: '🚕', category: '탈것' },
+  { korean: '로켓', english: 'Rocket', emoji: '🚀', category: '탈것' },
+  // Things (10)
+  { korean: '집', english: 'House', emoji: '🏠', category: '사물' },
+  { korean: '문', english: 'Door', emoji: '🚪', category: '사물' },
+  { korean: '시계', english: 'Clock', emoji: '⏰', category: '사물' },
+  { korean: '열쇠', english: 'Key', emoji: '🔑', category: '사물' },
+  { korean: '전화기', english: 'Phone', emoji: '📱', category: '사물' },
+  { korean: '컴퓨터', english: 'Computer', emoji: '💻', category: '사물' },
+  { korean: '우산', english: 'Umbrella', emoji: '☂️', category: '사물' },
+  { korean: '안경', english: 'Glasses', emoji: '👓', category: '사물' },
+  { korean: '모자', english: 'Hat', emoji: '🧢', category: '사물' },
+  { korean: '신발', english: 'Shoes', emoji: '👟', category: '사물' },
 ];
 
 const BUTTON_COLORS = ['#FCA5A5', '#86EFAC', '#93C5FD', '#FDE68A'];
@@ -204,14 +258,36 @@ function playCelebration(ctx: AudioContext) {
   });
 }
 
+let speechWarmedUp = false;
+
+function warmUpSpeech() {
+  if (speechWarmedUp) return;
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  // iOS requires speechSynthesis to be triggered from a user gesture at least once
+  const u = new SpeechSynthesisUtterance('');
+  u.volume = 0;
+  window.speechSynthesis.speak(u);
+  speechWarmedUp = true;
+}
+
 function speakWord(word: string) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(word);
-  utterance.lang = 'en-US';
-  utterance.rate = 0.8;
-  utterance.pitch = 1.1;
-  window.speechSynthesis.speak(utterance);
+  // Small delay helps iOS process the cancel before new speak
+  setTimeout(() => {
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.7;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    // Try to get a good English voice
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Samantha'))
+      || voices.find(v => v.lang.startsWith('en-US'))
+      || voices.find(v => v.lang.startsWith('en'));
+    if (enVoice) utterance.voice = enVoice;
+    window.speechSynthesis.speak(utterance);
+  }, 50);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -1192,6 +1268,7 @@ export default function EnglishWordMasterPage() {
         const cy = startY + row * (cardH + 14);
         if (x >= cx && x <= cx + cardW && y >= cy && y <= cy + cardH) {
           ensureAudio();
+          warmUpSpeech();
           setSelectedChar(i);
           selectedCharRef.current = i;
           return;
