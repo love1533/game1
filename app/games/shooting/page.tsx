@@ -358,6 +358,7 @@ export default function ShootingGame() {
     let wave = 0;
     let waveActive = false;
     let waveEnemiesLeft = 0;
+    let waveDelayCounter = 0;
     let waveAnnounceTimer = 0;
     const WAVE_ANNOUNCE_DURATION = 120;
     let bossActive = false;
@@ -831,10 +832,19 @@ export default function ShootingGame() {
 
       // Start first wave or next wave
       if (!waveActive && enemies.length === 0 && waveAnnounceTimer <= 0) {
-        // Small delay between waves (90 frames ~1.5s, first wave immediate)
-        if (wave === 0 || frame % 90 === 0) {
+        if (wave === 0) {
           spawnWave();
+        } else {
+          // Use a counter for delay between waves instead of frame % check
+          if (!waveDelayCounter) waveDelayCounter = 1;
+          else waveDelayCounter++;
+          if (waveDelayCounter >= 90) {
+            waveDelayCounter = 0;
+            spawnWave();
+          }
         }
+      } else {
+        waveDelayCounter = 0;
       }
 
       // Player movement
