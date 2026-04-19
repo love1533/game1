@@ -11,21 +11,28 @@ interface Character {
   heart: string;
 }
 
+interface BGMNote {
+  freq: number;
+  duration: number;
+  delay: number;
+}
+
 interface Song {
   id: number;
   title: string;
   artist: string;
   bpm: number;
-  difficulty: number; // 1-5 stars
+  difficulty: number;
   color: string;
   accentColor: string;
   lyrics: LyricLine[];
   notePattern: NoteSection[];
   scaleFreqs: number[];
+  buildBGM: (duration: number) => BGMNote[];
 }
 
 interface LyricLine {
-  time: number;   // ms from start when this line appears
+  time: number;
   text: string;
   subText?: string;
 }
@@ -39,7 +46,7 @@ interface NoteSection {
 
 interface Note {
   id: number;
-  lane: number;
+  lane: number; // 0-4
   y: number;
   hitTime: number;
   hit: boolean;
@@ -87,9 +94,11 @@ const CHARACTERS: Character[] = [
   { name: '준우', color: '#0EA5E9', emoji: '✈️', heart: '💎' },
 ];
 
-const LANE_COLORS = ['#FFB3C6', '#B3F0DC', '#C9B3F5'];
-const LANE_GLOW_COLORS = ['#FF6B9D', '#4ECDC4', '#9B59B6'];
-const NOTE_COLORS = ['#FF8FAB', '#5CE1C0', '#B48EF7'];
+// 5 lane colors: pink, mint, lavender, peach, sky blue
+const LANE_COLORS = ['#FFB3C6', '#B3F0DC', '#C9B3F5', '#FFD4B3', '#B3D9FF'];
+const LANE_GLOW_COLORS = ['#FF6B9D', '#4ECDC4', '#9B59B6', '#FF8C42', '#0EA5E9'];
+const NOTE_COLORS = ['#FF8FAB', '#5CE1C0', '#B48EF7', '#FFB366', '#5BB8FF'];
+const KEY_LABELS = ['D', 'F', 'J', 'K', 'L'];
 
 const TIMING = { PERFECT: 80, GREAT: 150, GOOD: 250 };
 const TIMING_SCORES = { PERFECT: 300, GREAT: 200, GOOD: 100 };
@@ -99,15 +108,39 @@ const NOTE_SYMBOLS = ['♪', '♫', '♩', '♬', '♪'];
 
 const SONG_DURATION = 50000;
 const HIT_ZONE_Y_RATIO = 0.82;
-const NOTE_TRAVEL_TIME = 2400; // easy: slow fall
+const NOTE_TRAVEL_TIME = 2500;
 const HEALTH_MAX = 100;
+const NUM_LANES = 5;
 
-// Pentatonic scale sets per song vibe
-const C_MAJOR_PENTA = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.7];
-const G_MAJOR_PENTA = [392.0, 440.0, 493.88, 587.33, 659.25, 783.99, 880.0];
-const D_MAJOR_PENTA = [293.66, 329.63, 369.99, 440.0, 493.88, 587.33, 659.25];
-const A_MAJOR_PENTA = [440.0, 493.88, 554.37, 659.25, 739.99, 880.0, 987.77];
-const F_MAJOR_PENTA = [349.23, 392.0, 440.0, 523.25, 587.33, 698.46, 783.99];
+// ─── BGM Builder helpers ───────────────────────────────────────────────────────
+function buildMelodyLoop(
+  notes: number[],        // frequencies in order
+  noteDuration: number,   // seconds each note lasts
+  totalDuration: number,  // total song duration in seconds
+  startDelay = 0,
+  volume = 0.12,
+  type: OscillatorType = 'sine',
+): BGMNote[] {
+  const result: BGMNote[] = [];
+  let t = startDelay;
+  let idx = 0;
+  while (t < totalDuration - noteDuration) {
+    result.push({ freq: notes[idx % notes.length], duration: noteDuration, delay: t });
+    t += noteDuration;
+    idx++;
+  }
+  void volume; void type;
+  return result;
+}
+
+function buildBassLoop(
+  notes: number[],
+  noteDuration: number,
+  totalDuration: number,
+  startDelay = 0,
+): BGMNote[] {
+  return buildMelodyLoop(notes.map(f => f / 2), noteDuration, totalDuration, startDelay, 0.1, 'triangle');
+}
 
 // ─── Songs ────────────────────────────────────────────────────────────────────
 const SONGS: Song[] = [
@@ -119,31 +152,40 @@ const SONGS: Song[] = [
     difficulty: 3,
     color: '#FF6B9D',
     accentColor: '#FFB3C6',
-    scaleFreqs: C_MAJOR_PENTA,
+    scaleFreqs: [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5],
     lyrics: [
-      { time: 0,     text: '🎵 APT. 🎵', subText: '로제 & 브루노마스' },
-      { time: 3000,  text: '아파트 아파트', subText: '아파트 아파트' },
-      { time: 7000,  text: '에이피티 에이피티', subText: 'APT. APT.' },
-      { time: 11000, text: '아파트 아파트', subText: '아파트 아파트' },
-      { time: 15000, text: '에이피티!', subText: 'Come on!' },
-      { time: 19000, text: '아파트 아파트', subText: '아파트 아파트' },
-      { time: 23000, text: '에이피티 에이피티', subText: 'APT. APT.' },
-      { time: 27000, text: '아파트 아파트', subText: '우리만의 공간' },
-      { time: 31000, text: '에이피티!', subText: 'Let\'s go!' },
-      { time: 35000, text: '아파트 아파트', subText: '아파트 아파트' },
-      { time: 39000, text: '에이피티 에이피티', subText: 'APT. APT.' },
-      { time: 43000, text: '아파트 아파트', subText: '아파트 아파트' },
-      { time: 47000, text: '에이피티! ✨', subText: 'Finale!' },
+      { time: 0,     text: '🎵 APT. 🎵',          subText: '로제 & 브루노마스' },
+      { time: 3000,  text: '아파트 아파트',          subText: '아파트 아파트' },
+      { time: 7000,  text: '에이피티 에이피티',       subText: 'APT. APT.' },
+      { time: 11000, text: '아파트 아파트',          subText: '아파트 아파트' },
+      { time: 15000, text: '에이피티!',             subText: 'Come on!' },
+      { time: 19000, text: '아파트 아파트',          subText: '아파트 아파트' },
+      { time: 23000, text: '에이피티 에이피티',       subText: 'APT. APT.' },
+      { time: 27000, text: '아파트 아파트',          subText: '우리만의 공간' },
+      { time: 31000, text: '에이피티!',             subText: "Let's go!" },
+      { time: 35000, text: '아파트 아파트',          subText: '아파트 아파트' },
+      { time: 39000, text: '에이피티 에이피티',       subText: 'APT. APT.' },
+      { time: 43000, text: '아파트 아파트',          subText: '아파트 아파트' },
+      { time: 47000, text: '에이피티! ✨',           subText: 'Finale!' },
     ],
     notePattern: [
-      { start: 2000,  intervalMs: Math.round(60000/148*2), count: 8,  pattern: 'single' },
-      { start: 8500,  intervalMs: Math.round(60000/148),   count: 12, pattern: 'pair' },
+      { start: 2000,  intervalMs: Math.round(60000/148*2),   count: 8,  pattern: 'single' },
+      { start: 8500,  intervalMs: Math.round(60000/148),     count: 12, pattern: 'pair' },
       { start: 17000, intervalMs: Math.round(60000/148*1.5), count: 10, pattern: 'single' },
-      { start: 24000, intervalMs: Math.round(60000/148),   count: 16, pattern: 'pair' },
-      { start: 34000, intervalMs: Math.round(60000/148*2), count: 8,  pattern: 'single' },
-      { start: 41000, intervalMs: Math.round(60000/148),   count: 12, pattern: 'pair' },
+      { start: 24000, intervalMs: Math.round(60000/148),     count: 16, pattern: 'pair' },
+      { start: 34000, intervalMs: Math.round(60000/148*2),   count: 8,  pattern: 'single' },
+      { start: 41000, intervalMs: Math.round(60000/148),     count: 12, pattern: 'pair' },
       { start: 48000, intervalMs: Math.round(60000/148*1.5), count: 6,  pattern: 'triple' },
     ],
+    buildBGM: (dur) => {
+      const beat = 60 / 148;
+      const melody = [523.25, 659.25, 783.99, 880.0, 783.99, 659.25, 523.25, 587.33];
+      const bass   = [261.63, 329.63, 392.0, 440.0];
+      return [
+        ...buildMelodyLoop(melody, beat, dur),
+        ...buildBassLoop(bass, beat * 2, dur, 0),
+      ];
+    },
   },
   {
     id: 1,
@@ -153,29 +195,38 @@ const SONGS: Song[] = [
     difficulty: 2,
     color: '#5CE1C0',
     accentColor: '#B3F0DC',
-    scaleFreqs: G_MAJOR_PENTA,
+    scaleFreqs: [392.0, 440.0, 493.88, 587.33, 659.25, 783.99],
     lyrics: [
-      { time: 0,     text: '🎵 Super Shy 🎵', subText: '뉴진스' },
-      { time: 3000,  text: '슈퍼 샤이', subText: 'Super Shy' },
-      { time: 7000,  text: 'I\'m super shy', subText: '슈퍼 샤이' },
-      { time: 11000, text: '슈퍼 샤이 슈퍼 샤이', subText: 'Super shy super shy' },
-      { time: 15000, text: 'I want to but I\'m shy', subText: '말하고 싶어' },
-      { time: 19000, text: '슈퍼 샤이', subText: 'Super Shy' },
-      { time: 23000, text: 'I\'m super super shy', subText: '너무 떨려' },
-      { time: 27000, text: '슈퍼 샤이 슈퍼 샤이', subText: 'Super shy super shy' },
-      { time: 31000, text: 'Can you see me?', subText: '날 봐줘' },
-      { time: 35000, text: '슈퍼 샤이', subText: 'Super Shy' },
-      { time: 39000, text: 'I\'m super super shy', subText: '슈퍼 샤이' },
-      { time: 43000, text: '슈퍼 샤이 슈퍼 샤이 ✨', subText: 'Finale!' },
+      { time: 0,     text: '🎵 Super Shy 🎵',         subText: '뉴진스' },
+      { time: 3000,  text: '슈퍼 샤이',                subText: 'Super Shy' },
+      { time: 7000,  text: "I'm super shy",           subText: '슈퍼 샤이' },
+      { time: 11000, text: '슈퍼 샤이 슈퍼 샤이',       subText: 'Super shy super shy' },
+      { time: 15000, text: "I want to but I'm shy",   subText: '말하고 싶어' },
+      { time: 19000, text: '슈퍼 샤이',                subText: 'Super Shy' },
+      { time: 23000, text: "I'm super super shy",     subText: '너무 떨려' },
+      { time: 27000, text: '슈퍼 샤이 슈퍼 샤이',       subText: 'Super shy super shy' },
+      { time: 31000, text: 'Can you see me?',         subText: '날 봐줘' },
+      { time: 35000, text: '슈퍼 샤이',                subText: 'Super Shy' },
+      { time: 39000, text: "I'm super super shy",     subText: '슈퍼 샤이' },
+      { time: 43000, text: '슈퍼 샤이 슈퍼 샤이 ✨',    subText: 'Finale!' },
     ],
     notePattern: [
-      { start: 2000,  intervalMs: Math.round(60000/130*2), count: 8,  pattern: 'single' },
+      { start: 2000,  intervalMs: Math.round(60000/130*2),   count: 8,  pattern: 'single' },
       { start: 9000,  intervalMs: Math.round(60000/130*1.5), count: 10, pattern: 'pair' },
-      { start: 17000, intervalMs: Math.round(60000/130),   count: 12, pattern: 'single' },
-      { start: 25000, intervalMs: Math.round(60000/130),   count: 14, pattern: 'pair' },
-      { start: 34000, intervalMs: Math.round(60000/130*2), count: 7,  pattern: 'single' },
+      { start: 17000, intervalMs: Math.round(60000/130),     count: 12, pattern: 'single' },
+      { start: 25000, intervalMs: Math.round(60000/130),     count: 14, pattern: 'pair' },
+      { start: 34000, intervalMs: Math.round(60000/130*2),   count: 7,  pattern: 'single' },
       { start: 41000, intervalMs: Math.round(60000/130*1.5), count: 10, pattern: 'pair' },
     ],
+    buildBGM: (dur) => {
+      const beat = 60 / 130;
+      const melody = [392.0, 493.88, 587.33, 659.25, 587.33, 493.88, 440.0, 392.0];
+      const bass   = [196.0, 246.94, 293.66, 329.63];
+      return [
+        ...buildMelodyLoop(melody, beat, dur),
+        ...buildBassLoop(bass, beat * 2, dur),
+      ];
+    },
   },
   {
     id: 2,
@@ -185,20 +236,20 @@ const SONGS: Song[] = [
     difficulty: 1,
     color: '#C9B3F5',
     accentColor: '#E8D5FF',
-    scaleFreqs: F_MAJOR_PENTA,
+    scaleFreqs: [349.23, 392.0, 440.0, 523.25, 587.33, 698.46],
     lyrics: [
-      { time: 0,     text: '🎵 Ditto 🎵', subText: '뉴진스' },
-      { time: 3500,  text: '디토 디토 디토', subText: 'Ditto ditto' },
-      { time: 8000,  text: 'I want you', subText: '나는 너를 원해' },
-      { time: 12000, text: '디토 디토', subText: 'Ditto ditto' },
-      { time: 16000, text: 'Only you', subText: '오직 너뿐이야' },
-      { time: 20000, text: '디토 디토 디토', subText: 'Ditto ditto' },
-      { time: 24000, text: 'I want you, need you', subText: '너가 필요해' },
-      { time: 28000, text: '디토 디토', subText: 'Ditto ditto' },
-      { time: 32000, text: 'I want you', subText: '나는 너를 원해' },
-      { time: 36000, text: '디토 디토 디토', subText: 'Ditto ditto' },
-      { time: 40000, text: 'Only you forever', subText: '영원히 너뿐' },
-      { time: 44000, text: '디토 💜', subText: 'Ditto~' },
+      { time: 0,     text: '🎵 Ditto 🎵',           subText: '뉴진스' },
+      { time: 3500,  text: '디토 디토 디토',           subText: 'Ditto ditto' },
+      { time: 8000,  text: 'I want you',             subText: '나는 너를 원해' },
+      { time: 12000, text: '디토 디토',               subText: 'Ditto ditto' },
+      { time: 16000, text: 'Only you',               subText: '오직 너뿐이야' },
+      { time: 20000, text: '디토 디토 디토',           subText: 'Ditto ditto' },
+      { time: 24000, text: 'I want you, need you',   subText: '너가 필요해' },
+      { time: 28000, text: '디토 디토',               subText: 'Ditto ditto' },
+      { time: 32000, text: 'I want you',             subText: '나는 너를 원해' },
+      { time: 36000, text: '디토 디토 디토',           subText: 'Ditto ditto' },
+      { time: 40000, text: 'Only you forever',       subText: '영원히 너뿐' },
+      { time: 44000, text: '디토 💜',                 subText: 'Ditto~' },
     ],
     notePattern: [
       { start: 2500,  intervalMs: Math.round(60000/100*2.5), count: 7,  pattern: 'single' },
@@ -208,6 +259,15 @@ const SONGS: Song[] = [
       { start: 35000, intervalMs: Math.round(60000/100*1.5), count: 10, pattern: 'pair' },
       { start: 43000, intervalMs: Math.round(60000/100*2),   count: 5,  pattern: 'single' },
     ],
+    buildBGM: (dur) => {
+      const beat = 60 / 100;
+      const melody = [349.23, 440.0, 523.25, 587.33, 523.25, 440.0, 392.0, 349.23];
+      const bass   = [174.61, 220.0, 261.63, 293.66];
+      return [
+        ...buildMelodyLoop(melody, beat * 1.5, dur, 0, 0.1, 'triangle'),
+        ...buildBassLoop(bass, beat * 3, dur),
+      ];
+    },
   },
   {
     id: 3,
@@ -217,30 +277,39 @@ const SONGS: Song[] = [
     difficulty: 3,
     color: '#FFD700',
     accentColor: '#FFF0A0',
-    scaleFreqs: D_MAJOR_PENTA,
+    scaleFreqs: [293.66, 329.63, 369.99, 440.0, 493.88, 587.33],
     lyrics: [
-      { time: 0,     text: '🎵 LOVE DIVE 🎵', subText: '아이브' },
-      { time: 3000,  text: '러브 다이브', subText: 'Love Dive' },
-      { time: 7000,  text: '난 궁금해 지고 있어', subText: 'I\'m getting curious' },
-      { time: 11000, text: '러브 다이브', subText: 'Love Dive' },
-      { time: 15000, text: '네 맘속으로 다이브', subText: 'Diving into your heart' },
-      { time: 19000, text: '러브 다이브 러브 다이브', subText: 'Love Dive Love Dive' },
-      { time: 23000, text: '난 궁금해 지고 있어', subText: 'I wonder about you' },
-      { time: 27000, text: '러브 다이브', subText: 'Love Dive' },
-      { time: 31000, text: '네가 좋아 너무 좋아', subText: 'I like you so much' },
-      { time: 35000, text: '러브 다이브 러브 다이브', subText: 'Love Dive Love Dive' },
-      { time: 39000, text: '난 궁금해 지고 있어', subText: 'Getting curious about you' },
-      { time: 43000, text: '러브 다이브 ✨', subText: 'Love Dive~' },
+      { time: 0,     text: '🎵 LOVE DIVE 🎵',           subText: '아이브' },
+      { time: 3000,  text: '러브 다이브',                subText: 'Love Dive' },
+      { time: 7000,  text: '난 궁금해 지고 있어',          subText: "I'm getting curious" },
+      { time: 11000, text: '러브 다이브',                subText: 'Love Dive' },
+      { time: 15000, text: '네 맘속으로 다이브',           subText: 'Diving into your heart' },
+      { time: 19000, text: '러브 다이브 러브 다이브',       subText: 'Love Dive Love Dive' },
+      { time: 23000, text: '난 궁금해 지고 있어',          subText: 'I wonder about you' },
+      { time: 27000, text: '러브 다이브',                subText: 'Love Dive' },
+      { time: 31000, text: '네가 좋아 너무 좋아',          subText: 'I like you so much' },
+      { time: 35000, text: '러브 다이브 러브 다이브',       subText: 'Love Dive Love Dive' },
+      { time: 39000, text: '난 궁금해 지고 있어',          subText: 'Getting curious about you' },
+      { time: 43000, text: '러브 다이브 ✨',              subText: 'Love Dive~' },
     ],
     notePattern: [
-      { start: 2000,  intervalMs: Math.round(60000/130*2), count: 8,  pattern: 'single' },
-      { start: 9000,  intervalMs: Math.round(60000/130),   count: 12, pattern: 'pair' },
-      { start: 17000, intervalMs: Math.round(60000/130*1.5), count: 10, pattern: 'single' },
+      { start: 2000,  intervalMs: Math.round(60000/130*2),    count: 8,  pattern: 'single' },
+      { start: 9000,  intervalMs: Math.round(60000/130),      count: 12, pattern: 'pair' },
+      { start: 17000, intervalMs: Math.round(60000/130*1.5),  count: 10, pattern: 'single' },
       { start: 25000, intervalMs: Math.round(60000/130*0.75), count: 14, pattern: 'pair' },
-      { start: 33000, intervalMs: Math.round(60000/130*2), count: 8,  pattern: 'single' },
-      { start: 40000, intervalMs: Math.round(60000/130),   count: 12, pattern: 'pair' },
-      { start: 47000, intervalMs: Math.round(60000/130*1.5), count: 5,  pattern: 'triple' },
+      { start: 33000, intervalMs: Math.round(60000/130*2),    count: 8,  pattern: 'single' },
+      { start: 40000, intervalMs: Math.round(60000/130),      count: 12, pattern: 'pair' },
+      { start: 47000, intervalMs: Math.round(60000/130*1.5),  count: 5,  pattern: 'triple' },
     ],
+    buildBGM: (dur) => {
+      const beat = 60 / 130;
+      const melody = [349.23, 440.0, 523.25, 587.33, 698.46, 587.33, 523.25, 440.0];
+      const bass   = [174.61, 220.0, 261.63, 293.66];
+      return [
+        ...buildMelodyLoop(melody, beat, dur),
+        ...buildBassLoop(bass, beat * 2, dur),
+      ];
+    },
   },
   {
     id: 4,
@@ -250,39 +319,49 @@ const SONGS: Song[] = [
     difficulty: 4,
     color: '#FF8C42',
     accentColor: '#FFD0A0',
-    scaleFreqs: A_MAJOR_PENTA,
+    scaleFreqs: [440.0, 493.88, 554.37, 659.25, 739.99, 880.0],
     lyrics: [
-      { time: 0,     text: '🎵 하입보이 🎵', subText: '뉴진스' },
-      { time: 2500,  text: '하입보이 하입보이', subText: 'Hype boy hype boy' },
-      { time: 6500,  text: 'Cookie cookie cookie', subText: '쿠키 쿠키 쿠키' },
-      { time: 10500, text: '하입보이 하입보이', subText: 'Hype boy hype boy' },
-      { time: 14500, text: 'Gimme that hype', subText: '그 하입을 줘' },
-      { time: 18500, text: '하입보이 하입보이', subText: 'Hype boy hype boy' },
-      { time: 22500, text: 'Cookie cookie cookie', subText: '쿠키 쿠키 쿠키' },
-      { time: 26500, text: '하입보이!', subText: 'Hype boy!' },
-      { time: 30500, text: 'Get it get it get it', subText: '가져 가져 가져' },
-      { time: 34500, text: '하입보이 하입보이', subText: 'Hype boy hype boy' },
-      { time: 38500, text: 'Cookie cookie cookie', subText: '쿠키 쿠키 쿠키' },
-      { time: 42500, text: '하입보이 하입보이', subText: 'Hype boy hype boy' },
-      { time: 46500, text: '하입보이! 🔥', subText: 'Finale!' },
+      { time: 0,     text: '🎵 하입보이 🎵',           subText: '뉴진스' },
+      { time: 2500,  text: '하입보이 하입보이',          subText: 'Hype boy hype boy' },
+      { time: 6500,  text: 'Cookie cookie cookie',     subText: '쿠키 쿠키 쿠키' },
+      { time: 10500, text: '하입보이 하입보이',          subText: 'Hype boy hype boy' },
+      { time: 14500, text: 'Gimme that hype',          subText: '그 하입을 줘' },
+      { time: 18500, text: '하입보이 하입보이',          subText: 'Hype boy hype boy' },
+      { time: 22500, text: 'Cookie cookie cookie',     subText: '쿠키 쿠키 쿠키' },
+      { time: 26500, text: '하입보이!',                subText: 'Hype boy!' },
+      { time: 30500, text: 'Get it get it get it',     subText: '가져 가져 가져' },
+      { time: 34500, text: '하입보이 하입보이',          subText: 'Hype boy hype boy' },
+      { time: 38500, text: 'Cookie cookie cookie',     subText: '쿠키 쿠키 쿠키' },
+      { time: 42500, text: '하입보이 하입보이',          subText: 'Hype boy hype boy' },
+      { time: 46500, text: '하입보이! 🔥',             subText: 'Finale!' },
     ],
     notePattern: [
-      { start: 1500,  intervalMs: Math.round(60000/128*1.5), count: 9,  pattern: 'single' },
-      { start: 8000,  intervalMs: Math.round(60000/128),     count: 12, pattern: 'pair' },
+      { start: 1500,  intervalMs: Math.round(60000/128*1.5),  count: 9,  pattern: 'single' },
+      { start: 8000,  intervalMs: Math.round(60000/128),      count: 12, pattern: 'pair' },
       { start: 15000, intervalMs: Math.round(60000/128*0.75), count: 10, pattern: 'pair' },
-      { start: 22000, intervalMs: Math.round(60000/128),     count: 14, pattern: 'pair' },
-      { start: 30000, intervalMs: Math.round(60000/128*1.5), count: 8,  pattern: 'single' },
-      { start: 37000, intervalMs: Math.round(60000/128),     count: 14, pattern: 'pair' },
+      { start: 22000, intervalMs: Math.round(60000/128),      count: 14, pattern: 'pair' },
+      { start: 30000, intervalMs: Math.round(60000/128*1.5),  count: 8,  pattern: 'single' },
+      { start: 37000, intervalMs: Math.round(60000/128),      count: 14, pattern: 'pair' },
       { start: 45500, intervalMs: Math.round(60000/128*0.75), count: 8,  pattern: 'triple' },
     ],
+    buildBGM: (dur) => {
+      const beat = 60 / 128;
+      const melody = [440.0, 554.37, 659.25, 739.99, 659.25, 554.37, 493.88, 440.0];
+      const bass   = [220.0, 277.18, 329.63, 369.99];
+      return [
+        ...buildMelodyLoop(melody, beat, dur),
+        ...buildBassLoop(bass, beat * 2, dur),
+      ];
+    },
   },
 ];
 
-// ─── Note generator per song ──────────────────────────────────────────────────
+// ─── Note generator ────────────────────────────────────────────────────────────
 function generateNotesForSong(song: Song): Note[] {
   const notes: Note[] = [];
   let id = 0;
-  const laneSeq = [0, 1, 2, 1, 0, 2, 0, 1, 2, 2, 0, 1, 1, 2, 0];
+  // Distribute across 5 lanes
+  const laneSeq = [0, 2, 4, 1, 3, 2, 0, 4, 1, 3, 0, 2, 4, 3, 1, 2, 0, 3, 4, 1];
   let seqIdx = 0;
 
   for (const section of song.notePattern) {
@@ -304,7 +383,7 @@ function generateNotesForSong(song: Song): Note[] {
       });
 
       if (section.pattern === 'pair' && i % 2 === 1) {
-        const lane2 = (lane + 1 + Math.floor(i / 2)) % 3;
+        const lane2 = (lane + 2) % NUM_LANES;
         const t2 = hitTime + Math.round(section.intervalMs * 0.35);
         if (t2 < SONG_DURATION - 500) {
           notes.push({
@@ -320,7 +399,7 @@ function generateNotesForSong(song: Song): Note[] {
       }
 
       if (section.pattern === 'triple' && i % 3 === 2) {
-        const lane3 = (lane + 2) % 3;
+        const lane3 = (lane + 4) % NUM_LANES;
         const t3 = hitTime + Math.round(section.intervalMs * 0.5);
         if (t3 < SONG_DURATION - 500) {
           notes.push({
@@ -349,11 +428,129 @@ function getAudioCtx(): AudioContext {
   return audioCtx;
 }
 
+function scheduleDrumBeat(ctx: AudioContext, bpm: number, totalDuration: number) {
+  const beatInterval = 60 / bpm;
+  for (let t = 0; t < totalDuration; t += beatInterval) {
+    // Kick drum on every beat
+    const kickOsc = ctx.createOscillator();
+    const kickGain = ctx.createGain();
+    kickOsc.connect(kickGain);
+    kickGain.connect(ctx.destination);
+    kickOsc.type = 'sine';
+    kickOsc.frequency.setValueAtTime(150, ctx.currentTime + t);
+    kickOsc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + t + 0.1);
+    kickGain.gain.setValueAtTime(0.28, ctx.currentTime + t);
+    kickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.1);
+    kickOsc.start(ctx.currentTime + t);
+    kickOsc.stop(ctx.currentTime + t + 0.12);
+
+    // Hi-hat on off-beats
+    const halfBeat = t + beatInterval / 2;
+    if (halfBeat < totalDuration) {
+      const bufSize = ctx.sampleRate * 0.05;
+      const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let s = 0; s < bufSize; s++) data[s] = (Math.random() * 2 - 1);
+      const source = ctx.createBufferSource();
+      source.buffer = buf;
+      const hihatGain = ctx.createGain();
+      const hihatFilter = ctx.createBiquadFilter();
+      hihatFilter.type = 'highpass';
+      hihatFilter.frequency.value = 7000;
+      source.connect(hihatFilter);
+      hihatFilter.connect(hihatGain);
+      hihatGain.connect(ctx.destination);
+      hihatGain.gain.setValueAtTime(0.06, ctx.currentTime + halfBeat);
+      hihatGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + halfBeat + 0.05);
+      source.start(ctx.currentTime + halfBeat);
+      source.stop(ctx.currentTime + halfBeat + 0.05);
+    }
+
+    // Snare on beats 2 and 4 of every bar
+    const beatInBar = Math.round(t / beatInterval) % 4;
+    if (beatInBar === 1 || beatInBar === 3) {
+      const snareSize = ctx.sampleRate * 0.15;
+      const snareBuf = ctx.createBuffer(1, snareSize, ctx.sampleRate);
+      const snareData = snareBuf.getChannelData(0);
+      for (let s = 0; s < snareSize; s++) snareData[s] = (Math.random() * 2 - 1) * Math.exp(-s / (snareSize * 0.3));
+      const snareSource = ctx.createBufferSource();
+      snareSource.buffer = snareBuf;
+      const snareGain = ctx.createGain();
+      snareSource.connect(snareGain);
+      snareGain.connect(ctx.destination);
+      snareGain.gain.setValueAtTime(0.12, ctx.currentTime + t);
+      snareGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15);
+      snareSource.start(ctx.currentTime + t);
+      snareSource.stop(ctx.currentTime + t + 0.15);
+    }
+  }
+}
+
+function playBGM(ctx: AudioContext, notes: BGMNote[], volume = 0.12, type: OscillatorType = 'sine') {
+  notes.forEach(note => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = type;
+    osc.frequency.value = note.freq;
+    gain.gain.setValueAtTime(volume, ctx.currentTime + note.delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + note.delay + note.duration - 0.02);
+    osc.start(ctx.currentTime + note.delay);
+    osc.stop(ctx.currentTime + note.delay + note.duration);
+  });
+}
+
+function startBGM(song: Song) {
+  try {
+    const ctx = getAudioCtx();
+    const durSec = SONG_DURATION / 1000;
+    const beat = 60 / song.bpm;
+
+    // Melody (sine)
+    const melodyNotes = song.buildBGM(durSec);
+    const melodyNotesBass = melodyNotes.filter(n => n.freq < 300);
+    const melodyNotesMid = melodyNotes.filter(n => n.freq >= 300);
+
+    playBGM(ctx, melodyNotesMid, 0.1, 'sine');
+    playBGM(ctx, melodyNotesBass, 0.09, 'triangle');
+
+    // Drum beat
+    scheduleDrumBeat(ctx, song.bpm, durSec);
+
+    // Pad chord layer (gentle sustained chord)
+    const padFreqs = [song.scaleFreqs[0], song.scaleFreqs[2], song.scaleFreqs[4]];
+    padFreqs.forEach(freq => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.value = freq * 0.5;
+      gain.gain.setValueAtTime(0, ctx.currentTime + beat);
+      gain.gain.linearRampToValueAtTime(0.025, ctx.currentTime + beat * 2);
+      gain.gain.setValueAtTime(0.025, ctx.currentTime + durSec - beat);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + durSec);
+      osc.start(ctx.currentTime + beat);
+      osc.stop(ctx.currentTime + durSec);
+    });
+  } catch (_) { /* ignore */ }
+}
+
+function stopBGM() {
+  try {
+    if (audioCtx && audioCtx.state !== 'closed') {
+      audioCtx.close();
+      audioCtx = null;
+    }
+  } catch (_) { /* ignore */ }
+}
+
 function playHitSound(lane: number, grade: 'PERFECT' | 'GREAT' | 'GOOD', scaleFreqs: number[]) {
   try {
     const ctx = getAudioCtx();
     const now = ctx.currentTime;
-    const baseIdx = lane * 2;
+    const baseIdx = lane * 1;
     const freqs = [
       scaleFreqs[baseIdx % scaleFreqs.length],
       scaleFreqs[(baseIdx + 2) % scaleFreqs.length],
@@ -361,8 +558,8 @@ function playHitSound(lane: number, grade: 'PERFECT' | 'GREAT' | 'GOOD', scaleFr
     ];
 
     const gainNode = ctx.createGain();
-    gainNode.gain.setValueAtTime(0.18, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+    gainNode.gain.setValueAtTime(0.22, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
     gainNode.connect(ctx.destination);
 
     const count = grade === 'PERFECT' ? 3 : grade === 'GREAT' ? 2 : 1;
@@ -372,21 +569,20 @@ function playHitSound(lane: number, grade: 'PERFECT' | 'GREAT' | 'GOOD', scaleFr
       osc.frequency.setValueAtTime(freqs[i], now);
       osc.connect(gainNode);
       osc.start(now + i * 0.02);
-      osc.stop(now + 0.38);
+      osc.stop(now + 0.35);
     }
 
     if (grade === 'PERFECT') {
-      // Extra shimmer
       const shimmer = ctx.createOscillator();
       shimmer.type = 'triangle';
       shimmer.frequency.setValueAtTime(freqs[2] * 2, now);
       const sGain = ctx.createGain();
-      sGain.gain.setValueAtTime(0.05, now);
-      sGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      sGain.gain.setValueAtTime(0.06, now);
+      sGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
       shimmer.connect(sGain);
       sGain.connect(ctx.destination);
       shimmer.start(now);
-      shimmer.stop(now + 0.25);
+      shimmer.stop(now + 0.22);
     }
   } catch (_) { /* ignore */ }
 }
@@ -438,7 +634,6 @@ export default function RhythmPage() {
   const [selectedChar, setSelectedChar] = useState<Character>(CHARACTERS[0]);
   const [selectedSong, setSelectedSong] = useState<Song>(SONGS[0]);
 
-  // Game refs
   const notesRef = useRef<Note[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const judgeEffectsRef = useRef<JudgeEffect[]>([]);
@@ -457,16 +652,17 @@ export default function RhythmPage() {
   const rafRef = useRef<number>(0);
   const canvasSizeRef = useRef({ w: 390, h: 844 });
   const currentLyricIdxRef = useRef(0);
-  const lyricFlashRef = useRef(0); // frames of flash when lyric changes
+  const lyricFlashRef = useRef(0);
+  const bgmStartedRef = useRef(false);
 
   const [resultData, setResultData] = useState({
     score: 0, maxCombo: 0, perfect: 0, great: 0, good: 0, miss: 0, grade: 'C', songTitle: '',
   });
 
   const getLayout = useCallback((w: number, h: number) => {
-    const laneWidth = w / 3;
+    const laneWidth = w / NUM_LANES;
     const hitZoneY = h * HIT_ZONE_Y_RATIO;
-    const noteRadius = Math.min(laneWidth * 0.30, 30);
+    const noteRadius = Math.min(laneWidth * 0.28, 26);
     return { laneWidth, hitZoneY, noteRadius };
   }, []);
 
@@ -517,11 +713,9 @@ export default function RhythmPage() {
     });
   }, []);
 
-  // ── Judge tap ─────────────────────────────────────────────────────
   const judgeTap = useCallback((lane: number) => {
     const { w, h } = canvasSizeRef.current;
-    const { hitZoneY } = getLayout(w, h);
-    const { laneWidth } = getLayout(w, h);
+    const { hitZoneY, laneWidth } = getLayout(w, h);
     const elapsed = performance.now() - startTimeRef.current;
 
     let bestNote: Note | null = null;
@@ -536,7 +730,6 @@ export default function RhythmPage() {
     }
 
     const laneX = lane * laneWidth + laneWidth / 2;
-    const laneColor = LANE_GLOW_COLORS[lane];
     laneGlowsRef.current.push({ lane, life: 20, maxLife: 20 });
 
     if (!bestNote) return;
@@ -551,7 +744,7 @@ export default function RhythmPage() {
       const mult = Math.max(1, Math.floor(comboRef.current / 10) + 1);
       scoreRef.current += TIMING_SCORES.PERFECT * mult;
       healthRef.current = Math.min(HEALTH_MAX, healthRef.current + TIMING_HEALTH.PERFECT);
-      spawnSparkles(laneX, hitZoneY, laneColor, 16);
+      spawnSparkles(laneX, hitZoneY, LANE_GLOW_COLORS[lane], 16);
       spawnBurst(laneX, hitZoneY, '#FFD700');
       spawnHeart(laneX, hitZoneY - 30, charRef.current.heart);
       judgeEffectsRef.current.push({
@@ -563,7 +756,7 @@ export default function RhythmPage() {
       countGreatRef.current++;
       const mult = Math.max(1, Math.floor(comboRef.current / 10) + 1);
       scoreRef.current += TIMING_SCORES.GREAT * mult;
-      spawnSparkles(laneX, hitZoneY, laneColor, 8);
+      spawnSparkles(laneX, hitZoneY, LANE_GLOW_COLORS[lane], 8);
       judgeEffectsRef.current.push({
         text: 'GREAT 💫', x: laneX, y: hitZoneY - 40,
         life: 50, maxLife: 50, color: '#A8E6CF', scale: 1.15,
@@ -581,36 +774,26 @@ export default function RhythmPage() {
     comboRef.current++;
     if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
     hitZoneGlowRef.current = 22;
-
     playHitSound(lane, grade, song.scaleFreqs);
   }, [getLayout, spawnSparkles, spawnBurst, spawnHeart]);
 
-  // ── Draw lyrics bar ────────────────────────────────────────────────
   const drawLyrics = useCallback((
     ctx: CanvasRenderingContext2D, w: number, elapsed: number, song: Song
   ) => {
     const lyrics = song.lyrics;
-    // Find current lyric
     let lyricIdx = 0;
     for (let i = lyrics.length - 1; i >= 0; i--) {
       if (elapsed >= lyrics[i].time) { lyricIdx = i; break; }
     }
-
     if (lyricIdx !== currentLyricIdxRef.current) {
       currentLyricIdxRef.current = lyricIdx;
       lyricFlashRef.current = 30;
     }
-
     const lyric = lyrics[lyricIdx];
-    const flashAlpha = lyricFlashRef.current > 0
-      ? 0.7 + (lyricFlashRef.current / 30) * 0.3
-      : 1.0;
+    const flashAlpha = lyricFlashRef.current > 0 ? 0.7 + (lyricFlashRef.current / 30) * 0.3 : 1.0;
     if (lyricFlashRef.current > 0) lyricFlashRef.current--;
-
-    // Next lyric (upcoming)
     const nextLyric = lyrics[lyricIdx + 1];
 
-    // Lyric panel background
     const panelH = 78;
     const panelY = 52;
     const panelGrad = ctx.createLinearGradient(0, panelY, 0, panelY + panelH);
@@ -619,8 +802,7 @@ export default function RhythmPage() {
     ctx.fillStyle = panelGrad;
     ctx.fillRect(0, panelY, w, panelH);
 
-    // Main lyric
-    const mainFontSize = Math.min(w * 0.068, 28);
+    const mainFontSize = Math.min(w * 0.058, 26);
     ctx.font = `bold ${mainFontSize}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -632,20 +814,18 @@ export default function RhythmPage() {
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
 
-    // Sub text
     if (lyric.subText) {
-      ctx.font = `${Math.min(w * 0.042, 17)}px sans-serif`;
+      ctx.font = `${Math.min(w * 0.038, 15)}px sans-serif`;
       ctx.fillStyle = song.accentColor;
       ctx.globalAlpha = 0.85 * flashAlpha;
-      ctx.fillText(lyric.subText, w / 2, panelY + 50);
+      ctx.fillText(lyric.subText, w / 2, panelY + 48);
       ctx.globalAlpha = 1;
     }
 
-    // Next lyrics preview (dimmed)
     if (nextLyric && elapsed >= nextLyric.time - 2000) {
       const timeUntilNext = nextLyric.time - elapsed;
       const previewAlpha = Math.max(0, 1 - timeUntilNext / 2000) * 0.4;
-      ctx.font = `${Math.min(w * 0.038, 15)}px sans-serif`;
+      ctx.font = `${Math.min(w * 0.034, 13)}px sans-serif`;
       ctx.fillStyle = '#FFFFFF';
       ctx.globalAlpha = previewAlpha;
       ctx.fillText(`▶ ${nextLyric.text}`, w / 2, panelY + 68);
@@ -653,7 +833,31 @@ export default function RhythmPage() {
     }
   }, []);
 
-  // ── Draw frame ────────────────────────────────────────────────────
+  const endGame = useCallback(() => {
+    phaseRef.current = 'result';
+    stopBGM();
+    const total = countPerfectRef.current + countGreatRef.current + countGoodRef.current + countMissRef.current;
+    const acc = total > 0
+      ? (countPerfectRef.current * 300 + countGreatRef.current * 200 + countGoodRef.current * 100) / (total * 300)
+      : 0;
+    let grade = 'C';
+    if (acc >= 0.95) grade = 'S';
+    else if (acc >= 0.82) grade = 'A';
+    else if (acc >= 0.65) grade = 'B';
+    setResultData({
+      score: scoreRef.current,
+      maxCombo: maxComboRef.current,
+      perfect: countPerfectRef.current,
+      great: countGreatRef.current,
+      good: countGoodRef.current,
+      miss: countMissRef.current,
+      grade,
+      songTitle: songRef.current.title,
+    });
+    saveScore('rhythm', charRef.current.name, scoreRef.current);
+    setPhase('result');
+  }, []);
+
   const drawFrame = useCallback((ctx: CanvasRenderingContext2D, timestamp: number) => {
     const w = canvasSizeRef.current.w;
     const h = canvasSizeRef.current.h;
@@ -664,58 +868,57 @@ export default function RhythmPage() {
     // Background
     const bg = ctx.createLinearGradient(0, 0, 0, h);
     bg.addColorStop(0, '#12082A');
-    bg.addColorStop(0.4, '#1A1040');
+    bg.addColorStop(0.45, '#1A1040');
     bg.addColorStop(1, '#0D0822');
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
 
-    // Animated stars
+    // Stars
     for (let i = 0; i < 40; i++) {
       const blink = Math.sin(elapsed * 0.001 + i * 1.7) * 0.5 + 0.5;
       const sx = ((i * 137.5 + elapsed * 0.004) % (w + 10)) - 5;
       const sy = ((i * 83.1) % h);
-      ctx.fillStyle = `rgba(255,255,255,${0.15 + blink * 0.35})`;
+      ctx.fillStyle = `rgba(255,255,255,${0.12 + blink * 0.3})`;
       ctx.beginPath();
       ctx.arc(sx, sy, 0.5 + (i % 3) * 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Song color pulse at bottom
+    // Bottom glow
     const pulse = Math.sin(elapsed * 0.003) * 0.5 + 0.5;
-    const bottomGlow = ctx.createRadialGradient(w / 2, h, 0, w / 2, h, w * 0.8);
-    bottomGlow.addColorStop(0, song.color + Math.round(30 + pulse * 20).toString(16).padStart(2, '0'));
+    const bottomGlow = ctx.createRadialGradient(w / 2, h, 0, w / 2, h, w * 0.85);
+    const hexGlow = Math.round(25 + pulse * 18).toString(16).padStart(2, '0');
+    bottomGlow.addColorStop(0, song.color + hexGlow);
     bottomGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = bottomGlow;
     ctx.fillRect(0, h * 0.6, w, h * 0.4);
 
     // Lane backgrounds
     const laneGlows = laneGlowsRef.current;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < NUM_LANES; i++) {
       const lx = i * laneWidth;
       const activeGlow = laneGlows.find(g => g.lane === i);
       const ga = activeGlow ? activeGlow.life / activeGlow.maxLife : 0;
 
-      // Lane tint
-      ctx.fillStyle = `rgba(255,255,255,${0.02 + ga * 0.12})`;
+      ctx.fillStyle = `rgba(255,255,255,${0.018 + ga * 0.1})`;
       ctx.fillRect(lx, 0, laneWidth, h);
 
-      // Hit area glow
       if (ga > 0) {
         const gg = ctx.createRadialGradient(
           lx + laneWidth / 2, hitZoneY, 0,
-          lx + laneWidth / 2, hitZoneY, laneWidth
+          lx + laneWidth / 2, hitZoneY, laneWidth * 1.2
         );
-        gg.addColorStop(0, LANE_GLOW_COLORS[i] + Math.round(ga * 100).toString(16).padStart(2, '0'));
+        gg.addColorStop(0, LANE_GLOW_COLORS[i] + Math.round(ga * 90).toString(16).padStart(2, '0'));
         gg.addColorStop(1, 'transparent');
         ctx.fillStyle = gg;
-        ctx.fillRect(lx, hitZoneY - laneWidth, laneWidth, laneWidth * 2);
+        ctx.fillRect(lx, hitZoneY - laneWidth * 1.2, laneWidth, laneWidth * 2.4);
       }
     }
 
     // Lane dividers
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.lineWidth = 1;
-    for (let i = 1; i < 3; i++) {
+    for (let i = 1; i < NUM_LANES; i++) {
       ctx.beginPath();
       ctx.moveTo(i * laneWidth, 0);
       ctx.lineTo(i * laneWidth, h);
@@ -724,7 +927,7 @@ export default function RhythmPage() {
 
     // Hit zone line
     const hzG = hitZoneGlowRef.current;
-    ctx.strokeStyle = `rgba(255,255,255,${0.55 + (hzG / 22) * 0.45})`;
+    ctx.strokeStyle = `rgba(255,255,255,${0.5 + (hzG / 22) * 0.5})`;
     ctx.lineWidth = 2 + (hzG / 22) * 2;
     ctx.shadowColor = 'white';
     ctx.shadowBlur = 6 + hzG * 0.6;
@@ -734,27 +937,33 @@ export default function RhythmPage() {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Hit zone circles
-    for (let i = 0; i < 3; i++) {
+    // Hit zone circles per lane
+    for (let i = 0; i < NUM_LANES; i++) {
       const cx = i * laneWidth + laneWidth / 2;
       const ag = laneGlows.find(g => g.lane === i);
       const ga = ag ? ag.life / ag.maxLife : 0;
-      const r = noteRadius * 1.2 + ga * 8;
+      const r = noteRadius * 1.15 + ga * 7;
 
       ctx.beginPath();
       ctx.arc(cx, hitZoneY, r, 0, Math.PI * 2);
       ctx.strokeStyle = LANE_COLORS[i] + 'CC';
-      ctx.lineWidth = 2.5 + ga * 2.5;
+      ctx.lineWidth = 2 + ga * 2;
       ctx.shadowColor = LANE_GLOW_COLORS[i];
-      ctx.shadowBlur = 10 + ga * 18;
+      ctx.shadowBlur = 10 + ga * 16;
       ctx.stroke();
       ctx.shadowBlur = 0;
 
       ctx.beginPath();
-      ctx.arc(cx, hitZoneY, r * 0.55, 0, Math.PI * 2);
-      const fillAlpha = Math.round(25 + ga * 55).toString(16).padStart(2, '0');
+      ctx.arc(cx, hitZoneY, r * 0.5, 0, Math.PI * 2);
+      const fillAlpha = Math.round(20 + ga * 50).toString(16).padStart(2, '0');
       ctx.fillStyle = LANE_COLORS[i] + fillAlpha;
       ctx.fill();
+
+      // Key label below hit zone
+      ctx.font = `bold ${Math.min(laneWidth * 0.28, 13)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = LANE_COLORS[i] + 'AA';
+      ctx.fillText(KEY_LABELS[i], cx, hitZoneY + noteRadius * 2.2);
     }
 
     // Notes
@@ -771,25 +980,25 @@ export default function RhythmPage() {
       const cx = note.lane * laneWidth + laneWidth / 2;
       const color = NOTE_COLORS[note.lane];
 
-      // Note shadow trail
+      // Trail
       const trailAlpha = Math.min(1, (noteY + noteRadius * 3) / (noteRadius * 6));
-      ctx.globalAlpha = trailAlpha * 0.25;
+      ctx.globalAlpha = trailAlpha * 0.22;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.ellipse(cx, noteY + noteRadius * 1.2, noteRadius * 0.7, noteRadius * 0.35, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, noteY + noteRadius * 1.1, noteRadius * 0.65, noteRadius * 0.32, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
 
       // Note glow
       ctx.shadowColor = color;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = 13;
 
       const grad = ctx.createRadialGradient(
         cx - noteRadius * 0.3, noteY - noteRadius * 0.3, 1,
         cx, noteY, noteRadius
       );
       grad.addColorStop(0, '#FFFFFF');
-      grad.addColorStop(0.35, color + 'EE');
+      grad.addColorStop(0.3, color + 'EE');
       grad.addColorStop(1, color + '88');
       ctx.beginPath();
       ctx.arc(cx, noteY, noteRadius, 0, Math.PI * 2);
@@ -797,9 +1006,8 @@ export default function RhythmPage() {
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Note symbol
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = `bold ${noteRadius * 0.82}px serif`;
+      ctx.font = `bold ${noteRadius * 0.78}px serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(note.symbol, cx, noteY);
@@ -810,9 +1018,8 @@ export default function RhythmPage() {
         comboRef.current = 0;
         countMissRef.current++;
         healthRef.current = Math.max(0, healthRef.current + TIMING_HEALTH.MISS);
-        const mx = note.lane * laneWidth + laneWidth / 2;
         judgeEffectsRef.current.push({
-          text: 'MISS 💔', x: mx, y: hitZoneY - 40,
+          text: 'MISS 💔', x: cx, y: hitZoneY - 40,
           life: 38, maxLife: 38, color: '#FF6B6B', scale: 1.0,
         });
         playMissSound();
@@ -829,7 +1036,6 @@ export default function RhythmPage() {
       p.life--;
       if (p.life <= 0) { particles.splice(i, 1); continue; }
       const alpha = p.life / p.maxLife;
-
       ctx.globalAlpha = alpha;
       if (p.type === 'heart' && p.char) {
         ctx.font = `${p.size}px serif`;
@@ -856,7 +1062,7 @@ export default function RhythmPage() {
       e.y -= 0.75;
       if (e.life <= 0) { effects.splice(i, 1); continue; }
       const alpha = Math.min(1, (e.life / e.maxLife) * 2.2);
-      const scaleVal = e.scale + (1 - e.life / e.maxLife) * 0.15;
+      const scaleVal = e.scale + (1 - e.life / e.maxLife) * 0.12;
       ctx.globalAlpha = alpha;
       ctx.fillStyle = e.color;
       ctx.shadowColor = e.color;
@@ -864,7 +1070,7 @@ export default function RhythmPage() {
       ctx.save();
       ctx.translate(e.x, e.y);
       ctx.scale(scaleVal, scaleVal);
-      ctx.font = `bold ${Math.min(w * 0.05, 19)}px sans-serif`;
+      ctx.font = `bold ${Math.min(w * 0.045, 17)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(e.text, 0, 0);
@@ -880,17 +1086,15 @@ export default function RhythmPage() {
     }
     if (hitZoneGlowRef.current > 0) hitZoneGlowRef.current--;
 
-    // ── HUD ───────────────────────────────────────────────────────
+    // ── HUD ───────────────────────────────────────────────────────────
     const score = scoreRef.current;
     const combo = comboRef.current;
     const health = healthRef.current;
 
-    // Top bar bg
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, w, 52);
 
-    // Character + emoji
-    ctx.font = `bold ${Math.min(w * 0.048, 18)}px sans-serif`;
+    ctx.font = `bold ${Math.min(w * 0.042, 16)}px sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = charRef.current.color;
@@ -899,30 +1103,27 @@ export default function RhythmPage() {
     ctx.fillText(`${charRef.current.emoji} ${charRef.current.name}`, 12, 26);
     ctx.shadowBlur = 0;
 
-    // Score
-    ctx.font = `bold ${Math.min(w * 0.055, 21)}px monospace`;
+    ctx.font = `bold ${Math.min(w * 0.05, 19)}px monospace`;
     ctx.textAlign = 'right';
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(score.toLocaleString(), w - 12, 26);
     ctx.textAlign = 'left';
 
-    // ── LYRICS ────────────────────────────────────────────────────
     drawLyrics(ctx, w, elapsed, song);
 
-    // Combo
     if (combo >= 2) {
-      const comboFontSize = Math.min(22 + combo * 0.15, 30);
+      const comboFontSize = Math.min(22 + combo * 0.12, 28);
       ctx.font = `bold ${comboFontSize}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = '#FFD700';
       ctx.shadowColor = '#FFD700';
       ctx.shadowBlur = 12;
-      ctx.fillText(`${combo}x COMBO`, w / 2, 142);
+      ctx.fillText(`${combo}x COMBO`, w / 2, 145);
       ctx.shadowBlur = 0;
     }
 
     // Health bar
-    const hbW = w * 0.44;
+    const hbW = w * 0.42;
     const hbH = 6;
     const hbX = (w - hbW) / 2;
     const hbY = 38;
@@ -953,23 +1154,13 @@ export default function RhythmPage() {
     // Character dancer at bottom center
     const danceOffset = Math.sin(elapsed * 0.004 * (song.bpm / 120)) * 4;
     const charX = w / 2;
-    const charY = h * 0.92 + danceOffset;
-    ctx.font = `${Math.min(w * 0.08, 32)}px serif`;
+    const charY = h * 0.925 + danceOffset;
+    ctx.font = `${Math.min(w * 0.07, 28)}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(charRef.current.emoji, charX, charY);
 
-    // Lane tap hints
-    const laneLabels = ['L', 'C', 'R'];
-    for (let i = 0; i < 3; i++) {
-      const cx2 = i * laneWidth + laneWidth / 2;
-      ctx.font = `${Math.min(w * 0.032, 12)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillStyle = LANE_COLORS[i] + '88';
-      ctx.fillText(laneLabels[i], cx2, hitZoneY + noteRadius * 2.2);
-    }
-
-    // Game over / end check
+    // End check
     if (health <= 0 && !gameOverRef.current) gameOverRef.current = true;
     if ((elapsed >= SONG_DURATION || gameOverRef.current) && phaseRef.current === 'playing') {
       for (const note of notes) {
@@ -980,33 +1171,8 @@ export default function RhythmPage() {
       }
       endGame();
     }
-  }, [getLayout, drawLyrics]);
+  }, [getLayout, drawLyrics, endGame]);
 
-  const endGame = useCallback(() => {
-    phaseRef.current = 'result';
-    const total = countPerfectRef.current + countGreatRef.current + countGoodRef.current + countMissRef.current;
-    const acc = total > 0
-      ? (countPerfectRef.current * 300 + countGreatRef.current * 200 + countGoodRef.current * 100) / (total * 300)
-      : 0;
-    let grade = 'C';
-    if (acc >= 0.95) grade = 'S';
-    else if (acc >= 0.82) grade = 'A';
-    else if (acc >= 0.65) grade = 'B';
-    setResultData({
-      score: scoreRef.current,
-      maxCombo: maxComboRef.current,
-      perfect: countPerfectRef.current,
-      great: countGreatRef.current,
-      good: countGoodRef.current,
-      miss: countMissRef.current,
-      grade,
-      songTitle: songRef.current.title,
-    });
-    saveScore('rhythm', charRef.current.name, scoreRef.current);
-    setPhase('result');
-  }, []);
-
-  // ── Game loop ─────────────────────────────────────────────────────
   const gameLoop = useCallback((ts: number) => {
     if (phaseRef.current !== 'playing') return;
     const canvas = canvasRef.current;
@@ -1017,8 +1183,8 @@ export default function RhythmPage() {
     rafRef.current = requestAnimationFrame(gameLoop);
   }, [drawFrame]);
 
-  // ── Start game ────────────────────────────────────────────────────
   const startGame = useCallback((char: Character, song: Song) => {
+    stopBGM();
     charRef.current = char;
     songRef.current = song;
     notesRef.current = generateNotesForSong(song);
@@ -1037,13 +1203,17 @@ export default function RhythmPage() {
     hitZoneGlowRef.current = 0;
     currentLyricIdxRef.current = 0;
     lyricFlashRef.current = 0;
+    bgmStartedRef.current = false;
     phaseRef.current = 'playing';
     setPhase('playing');
     startTimeRef.current = performance.now();
+    // Start BGM immediately
+    startBGM(song);
+    bgmStartedRef.current = true;
     rafRef.current = requestAnimationFrame(gameLoop);
   }, [gameLoop]);
 
-  // ── Canvas resize ──────────────────────────────────────────────────
+  // Canvas resize
   useEffect(() => {
     const resize = () => {
       const canvas = canvasRef.current;
@@ -1057,13 +1227,25 @@ export default function RhythmPage() {
     return () => window.removeEventListener('resize', resize);
   }, []);
 
-  // ── Touch/click during gameplay ────────────────────────────────────
+  // Keyboard input during gameplay
+  useEffect(() => {
+    if (phase !== 'playing') return;
+    const keyMap: Record<string, number> = { d: 0, f: 1, j: 2, k: 3, l: 4, '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 };
+    const onKey = (e: KeyboardEvent) => {
+      const lane = keyMap[e.key.toLowerCase()];
+      if (lane !== undefined) judgeTap(lane);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase, judgeTap]);
+
+  // Touch/click during gameplay
   useEffect(() => {
     if (phase !== 'playing') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const { w } = canvasSizeRef.current;
-    const laneW = w / 3;
+    const laneW = w / NUM_LANES;
 
     const onTouch = (e: TouchEvent) => {
       e.preventDefault();
@@ -1072,14 +1254,14 @@ export default function RhythmPage() {
         const rect = canvas.getBoundingClientRect();
         const x = touch.clientX - rect.left;
         const lane = Math.floor(x / laneW);
-        if (lane >= 0 && lane <= 2) judgeTap(lane);
+        if (lane >= 0 && lane < NUM_LANES) judgeTap(lane);
       }
     };
     const onClick = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const lane = Math.floor(x / laneW);
-      if (lane >= 0 && lane <= 2) judgeTap(lane);
+      if (lane >= 0 && lane < NUM_LANES) judgeTap(lane);
     };
 
     canvas.addEventListener('touchstart', onTouch, { passive: false });
@@ -1090,10 +1272,13 @@ export default function RhythmPage() {
     };
   }, [phase, judgeTap]);
 
-  // ── RAF cleanup ────────────────────────────────────────────────────
-  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+  // RAF cleanup
+  useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    stopBGM();
+  }, []);
 
-  // ── Character Select screen ────────────────────────────────────────
+  // ── Character Select ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'charSelect') return;
     const canvas = canvasRef.current;
@@ -1109,14 +1294,12 @@ export default function RhythmPage() {
       const h = canvas.height;
       ctx.clearRect(0, 0, w, h);
 
-      // BG
       const bg = ctx.createLinearGradient(0, 0, 0, h);
       bg.addColorStop(0, '#140A28');
       bg.addColorStop(1, '#0E0820');
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
 
-      // Stars
       for (let i = 0; i < 35; i++) {
         const blink = Math.sin(tick * 0.05 + i * 1.3) * 0.5 + 0.5;
         ctx.fillStyle = `rgba(255,255,255,${0.1 + blink * 0.3})`;
@@ -1125,84 +1308,78 @@ export default function RhythmPage() {
         ctx.fill();
       }
 
-      // Title
-      ctx.font = `bold ${Math.min(w * 0.09, 36)}px sans-serif`;
+      ctx.font = `bold ${Math.min(w * 0.085, 34)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#FFFFFF';
       ctx.shadowColor = '#FF6B9D';
       ctx.shadowBlur = 20;
-      ctx.fillText('🎵 K-POP 리듬게임', w / 2, h * 0.09);
+      ctx.fillText('🎵 K-POP 리듬게임', w / 2, h * 0.08);
       ctx.shadowBlur = 0;
 
-      ctx.font = `${Math.min(w * 0.042, 16)}px sans-serif`;
+      ctx.font = `${Math.min(w * 0.04, 15)}px sans-serif`;
       ctx.fillStyle = '#C9B3F5';
-      ctx.fillText('캐릭터를 선택하세요!', w / 2, h * 0.15);
+      ctx.fillText('캐릭터를 선택하세요!', w / 2, h * 0.14);
 
-      // Cards
-      const cardW = Math.min(w * 0.38, 148);
-      const cardH = cardW * 1.3;
-      const gridW = cardW * 2 + 16;
-      const gridX = (w - gridW) / 2;
-      const gridY = h * 0.2;
+      const cols = 3;
+      const cardW = Math.min((w - 48) / cols, 130);
+      const cardH = cardW * 1.25;
+      const gapX = (w - cols * cardW) / (cols + 1);
+      const gapY = 12;
+      const gridY = h * 0.18;
 
       CHARACTERS.forEach((char, idx) => {
-        const col = idx % 2;
-        const row = Math.floor(idx / 2);
-        const cx = gridX + col * (cardW + 16);
-        const cy = gridY + row * (cardH + 14);
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const cx = gapX + col * (cardW + gapX);
+        const cy = gridY + row * (cardH + gapY);
         const isSel = char.name === selectedChar.name;
         const p = Math.sin(tick * 0.06 + idx * 1.1) * 0.5 + 0.5;
 
-        // Card fill
         const cg = ctx.createLinearGradient(cx, cy, cx + cardW, cy + cardH);
         cg.addColorStop(0, char.color + (isSel ? '55' : '22'));
         cg.addColorStop(1, char.color + '10');
         ctx.fillStyle = cg;
         ctx.beginPath();
-        ctx.roundRect(cx, cy, cardW, cardH, 14);
+        ctx.roundRect(cx, cy, cardW, cardH, 12);
         ctx.fill();
 
-        // Border
         ctx.strokeStyle = isSel ? char.color : char.color + '60';
-        ctx.lineWidth = isSel ? 3 : 1.5;
+        ctx.lineWidth = isSel ? 2.5 : 1.5;
         ctx.shadowColor = char.color;
-        ctx.shadowBlur = isSel ? 18 + p * 8 : 4;
+        ctx.shadowBlur = isSel ? 16 + p * 8 : 4;
         ctx.beginPath();
-        ctx.roundRect(cx, cy, cardW, cardH, 14);
+        ctx.roundRect(cx, cy, cardW, cardH, 12);
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // Emoji
-        ctx.font = `${Math.min(cardW * 0.38, 50)}px serif`;
+        ctx.font = `${Math.min(cardW * 0.35, 44)}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(char.emoji, cx + cardW / 2, cy + cardH * 0.36);
+        ctx.fillText(char.emoji, cx + cardW / 2, cy + cardH * 0.35);
 
-        // Name
-        ctx.font = `bold ${Math.min(cardW * 0.2, 22)}px sans-serif`;
+        ctx.font = `bold ${Math.min(cardW * 0.18, 20)}px sans-serif`;
         ctx.fillStyle = '#FFFFFF';
         ctx.shadowColor = char.color;
         ctx.shadowBlur = 6;
-        ctx.fillText(char.name, cx + cardW / 2, cy + cardH * 0.64);
+        ctx.fillText(char.name, cx + cardW / 2, cy + cardH * 0.63);
         ctx.shadowBlur = 0;
 
-        // Heart
-        ctx.font = `${Math.min(cardW * 0.16, 20)}px serif`;
+        ctx.font = `${Math.min(cardW * 0.15, 18)}px serif`;
         ctx.fillText(char.heart, cx + cardW / 2, cy + cardH * 0.8);
 
         if (isSel) {
-          ctx.font = `${Math.min(cardW * 0.16, 16)}px sans-serif`;
+          ctx.font = `${Math.min(cardW * 0.14, 14)}px sans-serif`;
           ctx.fillStyle = '#FFD700';
           ctx.fillText('✓ 선택', cx + cardW / 2, cy + cardH * 0.93);
         }
       });
 
-      // Next button
-      const btnW = Math.min(w * 0.6, 220);
-      const btnH = 54;
+      const rows = Math.ceil(CHARACTERS.length / cols);
+      const btnW = Math.min(w * 0.58, 210);
+      const btnH = 52;
       const btnX = (w - btnW) / 2;
-      const btnY = gridY + 2 * (cardH + 14) + 18;
+      const btnY = gridY + rows * (cardH + gapY) + 16;
       const bp = Math.sin(tick * 0.08) * 3;
       const bGrad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
       bGrad.addColorStop(0, '#FF6B9D');
@@ -1214,7 +1391,7 @@ export default function RhythmPage() {
       ctx.roundRect(btnX, btnY, btnW, btnH, btnH / 2);
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.font = `bold ${Math.min(w * 0.055, 20)}px sans-serif`;
+      ctx.font = `bold ${Math.min(w * 0.052, 19)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#FFF';
@@ -1222,23 +1399,23 @@ export default function RhythmPage() {
 
       animFrame = requestAnimationFrame(draw);
     };
-
     animFrame = requestAnimationFrame(draw);
 
     const handleInput = (tx: number, ty: number) => {
       const w = canvas.width;
       const h = canvas.height;
-      const cardW = Math.min(w * 0.38, 148);
-      const cardH = cardW * 1.3;
-      const gridW = cardW * 2 + 16;
-      const gridX = (w - gridW) / 2;
-      const gridY = h * 0.2;
+      const cols = 3;
+      const cardW = Math.min((w - 48) / cols, 130);
+      const cardH = cardW * 1.25;
+      const gapX = (w - cols * cardW) / (cols + 1);
+      const gapY = 12;
+      const gridY = h * 0.18;
 
       for (let idx = 0; idx < CHARACTERS.length; idx++) {
-        const col = idx % 2;
-        const row = Math.floor(idx / 2);
-        const cx = gridX + col * (cardW + 16);
-        const cy = gridY + row * (cardH + 14);
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const cx = gapX + col * (cardW + gapX);
+        const cy = gridY + row * (cardH + gapY);
         if (tx >= cx && tx <= cx + cardW && ty >= cy && ty <= cy + cardH) {
           setSelectedChar(CHARACTERS[idx]);
           playSelectSound(440 + idx * 110);
@@ -1246,10 +1423,11 @@ export default function RhythmPage() {
         }
       }
 
-      const btnW = Math.min(w * 0.6, 220);
-      const btnH = 54;
+      const rows = Math.ceil(CHARACTERS.length / cols);
+      const btnW = Math.min(w * 0.58, 210);
+      const btnH = 52;
       const btnX = (w - btnW) / 2;
-      const btnY = gridY + 2 * (cardH + 14) + 18;
+      const btnY = gridY + rows * (cardH + gapY) + 16;
       if (tx >= btnX && tx <= btnX + btnW && ty >= btnY && ty <= btnY + btnH) {
         cancelAnimationFrame(animFrame);
         phaseRef.current = 'songSelect';
@@ -1276,7 +1454,7 @@ export default function RhythmPage() {
     };
   }, [phase, selectedChar]);
 
-  // ── Song Select screen ─────────────────────────────────────────────
+  // ── Song Select ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'songSelect') return;
     const canvas = canvasRef.current;
@@ -1292,55 +1470,49 @@ export default function RhythmPage() {
       const h = canvas.height;
       ctx.clearRect(0, 0, w, h);
 
-      // BG
       const bg = ctx.createLinearGradient(0, 0, 0, h);
       bg.addColorStop(0, '#140A28');
       bg.addColorStop(1, '#0E0820');
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
 
-      // Stars
       for (let i = 0; i < 30; i++) {
         const blink = Math.sin(tick * 0.04 + i * 1.5) * 0.5 + 0.5;
-        ctx.fillStyle = `rgba(255,255,255,${0.08 + blink * 0.25})`;
+        ctx.fillStyle = `rgba(255,255,255,${0.08 + blink * 0.22})`;
         ctx.beginPath();
         ctx.arc((i * 137.5 + tick * 0.03) % w, (i * 83.1) % h, 0.5 + (i % 3) * 0.4, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Title
-      ctx.font = `bold ${Math.min(w * 0.075, 28)}px sans-serif`;
+      ctx.font = `bold ${Math.min(w * 0.072, 27)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#FFFFFF';
       ctx.shadowColor = '#C9B3F5';
       ctx.shadowBlur = 14;
-      ctx.fillText('🎵 곡 선택', w / 2, h * 0.06);
+      ctx.fillText('🎵 곡 선택', w / 2, h * 0.055);
       ctx.shadowBlur = 0;
 
-      // Selected char display
-      ctx.font = `${Math.min(w * 0.038, 14)}px sans-serif`;
+      ctx.font = `${Math.min(w * 0.036, 13)}px sans-serif`;
       ctx.fillStyle = selectedChar.color;
-      ctx.fillText(`${selectedChar.emoji} ${selectedChar.name}`, w / 2, h * 0.11);
+      ctx.fillText(`${selectedChar.emoji} ${selectedChar.name}`, w / 2, h * 0.1);
 
-      // Song cards
       const cardW = w - 32;
-      const cardH = Math.min(h * 0.13, 76);
-      const cardGap = 10;
-      const startY = h * 0.155;
+      const cardH = Math.min(h * 0.125, 72);
+      const cardGap = 9;
+      const startY = h * 0.145;
 
       SONGS.forEach((song, idx) => {
         const cy = startY + idx * (cardH + cardGap);
         const isSel = song.id === selectedSong.id;
         const p = Math.sin(tick * 0.05 + idx * 0.8) * 0.5 + 0.5;
 
-        // Card bg
         const sg = ctx.createLinearGradient(16, cy, 16 + cardW, cy + cardH);
         sg.addColorStop(0, song.color + (isSel ? '44' : '1A'));
         sg.addColorStop(1, song.accentColor + '0A');
         ctx.fillStyle = sg;
         ctx.beginPath();
-        ctx.roundRect(16, cy, cardW, cardH, 12);
+        ctx.roundRect(16, cy, cardW, cardH, 11);
         ctx.fill();
 
         ctx.strokeStyle = isSel ? song.color : song.color + '50';
@@ -1348,67 +1520,61 @@ export default function RhythmPage() {
         ctx.shadowColor = song.color;
         ctx.shadowBlur = isSel ? 14 + p * 6 : 3;
         ctx.beginPath();
-        ctx.roundRect(16, cy, cardW, cardH, 12);
+        ctx.roundRect(16, cy, cardW, cardH, 11);
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // Song info
         const textX = 28;
         const midY = cy + cardH / 2;
 
         // BPM badge
-        const bpmBadgeW = 56;
+        const bpmBadgeW = 58;
         ctx.fillStyle = song.color + '33';
         ctx.beginPath();
-        ctx.roundRect(cardW - 30, cy + 8, bpmBadgeW, 18, 9);
+        ctx.roundRect(16 + cardW - bpmBadgeW - 8, cy + 8, bpmBadgeW, 17, 8);
         ctx.fill();
-        ctx.font = `bold ${Math.min(w * 0.028, 11)}px monospace`;
+        ctx.font = `bold ${Math.min(w * 0.026, 10)}px monospace`;
         ctx.textAlign = 'center';
         ctx.fillStyle = song.accentColor;
-        ctx.fillText(`BPM ${song.bpm}`, cardW - 30 + bpmBadgeW / 2, cy + 8 + 9 + 1);
+        ctx.fillText(`BPM ${song.bpm}`, 16 + cardW - bpmBadgeW / 2 - 8, cy + 8 + 9);
         ctx.textAlign = 'left';
 
-        // Title
-        ctx.font = `bold ${Math.min(w * 0.055, 21)}px sans-serif`;
+        ctx.font = `bold ${Math.min(w * 0.052, 20)}px sans-serif`;
         ctx.fillStyle = '#FFFFFF';
         ctx.shadowColor = isSel ? song.color : 'transparent';
         ctx.shadowBlur = isSel ? 8 : 0;
-        ctx.fillText(song.title, textX, midY - 10);
+        ctx.fillText(song.title, textX, midY - 9);
         ctx.shadowBlur = 0;
 
-        // Artist
-        ctx.font = `${Math.min(w * 0.037, 14)}px sans-serif`;
+        ctx.font = `${Math.min(w * 0.034, 13)}px sans-serif`;
         ctx.fillStyle = song.accentColor;
-        ctx.fillText(song.artist, textX, midY + 10);
+        ctx.fillText(song.artist, textX, midY + 9);
 
-        // Difficulty stars
-        const starSize = Math.min(w * 0.032, 13);
+        const starSize = Math.min(w * 0.03, 12);
         ctx.font = `${starSize}px serif`;
         let starStr = '';
         for (let s = 0; s < 5; s++) starStr += s < song.difficulty ? '★' : '☆';
         ctx.fillStyle = '#FFD700';
-        ctx.fillText(starStr, textX, midY + 26);
+        ctx.fillText(starStr, textX, midY + 25);
       });
 
-      // Back button
       const backY = startY + SONGS.length * (cardH + cardGap) + 12;
       const backW = 100;
-      const backH = 40;
+      const backH = 42;
       ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      ctx.strokeStyle = 'rgba(201,179,245,0.4)';
+      ctx.strokeStyle = 'rgba(201,179,245,0.35)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(16, backY, backW, backH, backH / 2);
       ctx.fill();
       ctx.stroke();
-      ctx.font = `${Math.min(w * 0.04, 15)}px sans-serif`;
+      ctx.font = `${Math.min(w * 0.038, 14)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = '#C9B3F5';
       ctx.fillText('← 뒤로', 16 + backW / 2, backY + backH / 2 + 1);
 
-      // Start button
-      const startBtnW = Math.min(w * 0.52, 195);
-      const startBtnH = 50;
+      const startBtnW = Math.min(w * 0.5, 185);
+      const startBtnH = 48;
       const startBtnX = w - 16 - startBtnW;
       const startBtnY = backY;
       const bp = Math.sin(tick * 0.09) * 3;
@@ -1422,24 +1588,22 @@ export default function RhythmPage() {
       ctx.roundRect(startBtnX, startBtnY, startBtnW, startBtnH, startBtnH / 2);
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.font = `bold ${Math.min(w * 0.05, 19)}px sans-serif`;
+      ctx.font = `bold ${Math.min(w * 0.048, 18)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = '#FFF';
       ctx.fillText('🎮 게임 시작!', startBtnX + startBtnW / 2, startBtnY + startBtnH / 2 + 1);
 
       animFrame = requestAnimationFrame(draw);
     };
-
     animFrame = requestAnimationFrame(draw);
 
     const handleInput = (tx: number, ty: number) => {
       const w = canvas.width;
       const h = canvas.height;
-      const cardH = Math.min(h * 0.13, 76);
-      const cardGap = 10;
-      const startY = h * 0.155;
+      const cardH = Math.min(h * 0.125, 72);
+      const cardGap = 9;
+      const startY = h * 0.145;
 
-      // Song cards
       for (let idx = 0; idx < SONGS.length; idx++) {
         const cy = startY + idx * (cardH + cardGap);
         if (tx >= 16 && tx <= w - 16 && ty >= cy && ty <= cy + cardH) {
@@ -1450,18 +1614,16 @@ export default function RhythmPage() {
       }
 
       const backY = startY + SONGS.length * (cardH + cardGap) + 12;
-      // Back
-      if (tx >= 16 && tx <= 116 && ty >= backY && ty <= backY + 40) {
+      if (tx >= 16 && tx <= 116 && ty >= backY && ty <= backY + 42) {
         cancelAnimationFrame(animFrame);
         phaseRef.current = 'charSelect';
         setPhase('charSelect');
         return;
       }
 
-      // Start
-      const startBtnW = Math.min(w * 0.52, 195);
+      const startBtnW = Math.min(w * 0.5, 185);
       const startBtnX = w - 16 - startBtnW;
-      if (tx >= startBtnX && tx <= startBtnX + startBtnW && ty >= backY && ty <= backY + 50) {
+      if (tx >= startBtnX && tx <= startBtnX + startBtnW && ty >= backY && ty <= backY + 48) {
         cancelAnimationFrame(animFrame);
         startGame(selectedChar, selectedSong);
       }
@@ -1486,7 +1648,7 @@ export default function RhythmPage() {
     };
   }, [phase, selectedChar, selectedSong, startGame]);
 
-  // ── Result overlay ─────────────────────────────────────────────────
+  // ── Result overlay ────────────────────────────────────────────────────────────
   const gradeColors: Record<string, string> = { S: '#FFD700', A: '#5CE1C0', B: '#C9B3F5', C: '#FFB3C6' };
   const gradeLabels: Record<string, string> = {
     S: 'S 랭크 - 완벽해요! ✨',
@@ -1517,12 +1679,10 @@ export default function RhythmPage() {
           padding: '24px 20px',
           overflowY: 'auto',
         }}>
-          {/* Song title */}
           <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 'clamp(12px,3vw,14px)', marginBottom: 6 }}>
             🎵 {resultData.songTitle}
           </div>
 
-          {/* Grade */}
           <div style={{
             fontSize: 'clamp(72px, 22vw, 100px)',
             fontWeight: 900,
@@ -1537,12 +1697,10 @@ export default function RhythmPage() {
             {gradeLabels[resultData.grade]}
           </div>
 
-          {/* Character */}
           <div style={{ fontSize: 'clamp(28px,9vw,44px)', marginBottom: 16 }}>
             {charRef.current.emoji} {charRef.current.name}
           </div>
 
-          {/* Stats */}
           <div style={{
             background: 'rgba(255,255,255,0.05)',
             borderRadius: 20,
@@ -1560,11 +1718,11 @@ export default function RhythmPage() {
             <StatRow label="MISS 💔" value={String(resultData.miss)} color="#FF6B6B" />
           </div>
 
-          {/* Buttons */}
           <div style={{ display: 'flex', gap: 12, width: '100%', maxWidth: 320 }}>
             <button
               onClick={() => {
                 cancelAnimationFrame(rafRef.current);
+                stopBGM();
                 phaseRef.current = 'songSelect';
                 setPhase('songSelect');
               }}
