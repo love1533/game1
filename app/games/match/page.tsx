@@ -117,10 +117,23 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+const PLAYABLE_CHARS = [
+  { name: '승민', color: '#3B82F6', emoji: '🤖', heart: '💙' },
+  { name: '건우', color: '#10B981', emoji: '🩺', heart: '💚' },
+  { name: '강우', color: '#F59E0B', emoji: '👨‍🍳', heart: '🧡' },
+  { name: '수현', color: '#EC4899', emoji: '💃', heart: '💗' },
+  { name: '이현', color: '#FF69B4', emoji: '👸', heart: '💖' },
+  { name: '준영', color: '#6366F1', emoji: '📚', heart: '💜' },
+  { name: '준우', color: '#0EA5E9', emoji: '✈️', heart: '💎' },
+];
+
 export default function MatchGame() {
+  const [screen, setScreen] = useState<'select' | 'game'>('select');
+  const [selectedCharIdx, setSelectedCharIdx] = useState(-1);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const soundRef = useRef<SoundManager | null>(null);
   const rafRef = useRef<number>(0);
+  const selectedCharRef = useRef(-1);
   const stateRef = useRef({
     cards: [] as Card[],
     flippedIds: [] as number[],
@@ -166,6 +179,7 @@ export default function MatchGame() {
   }, [initCards]);
 
   useEffect(() => {
+    if (screen !== 'game') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -606,7 +620,8 @@ export default function MatchGame() {
                 if (s.matchedPairs === 6) {
                   s.gameOver = true;
                   const matchScore = Math.max(0, 10000 - s.moves * 80 - s.elapsed * 5);
-                  saveScore('match', CHARACTERS[s.winCharIdx].name, matchScore);
+                  const charName = selectedCharRef.current >= 0 ? PLAYABLE_CHARS[selectedCharRef.current].name : CHARACTERS[s.winCharIdx].name;
+                  saveScore('match', charName, matchScore);
                   sound?.win();
                   spawnConfetti();
                   setTimeout(() => spawnConfetti(), 500);
@@ -647,7 +662,52 @@ export default function MatchGame() {
       canvas.removeEventListener('touchstart', onTouchStart);
       canvas.removeEventListener('mousedown', onMouseDown);
     };
-  }, [restart]);
+  }, [restart, screen]);
+
+  if (screen === 'select') {
+    return (
+      <div style={{
+        width: '100vw', height: '100dvh',
+        background: 'linear-gradient(135deg, #FFF5F9, #F0F4FF, #FFF0F5)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'sans-serif', padding: 20,
+      }}>
+        <a href="/" style={{
+          position: 'absolute', top: 16, left: 16, color: '#9B59B6', textDecoration: 'none',
+          fontSize: 14, background: 'rgba(255,255,255,0.8)', borderRadius: 12, padding: '6px 14px',
+        }}>← 홈</a>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>🐾</div>
+        <h1 style={{ fontSize: 28, fontWeight: 'bold', color: '#6B21A8', marginBottom: 4 }}>짝맞추기</h1>
+        <p style={{ fontSize: 14, color: '#9B59B6', marginBottom: 24 }}>캐릭터를 선택하세요!</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, maxWidth: 340, width: '100%' }}>
+          {PLAYABLE_CHARS.map((c, i) => (
+            <button key={c.name} onClick={() => { setSelectedCharIdx(i); }}
+              style={{
+                background: selectedCharIdx === i ? `${c.color}22` : 'rgba(255,255,255,0.9)',
+                border: selectedCharIdx === i ? `3px solid ${c.color}` : '3px solid transparent',
+                borderRadius: 16, padding: '14px 4px', cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                transition: 'all 0.15s',
+              }}>
+              <span style={{ fontSize: 32 }}>{c.emoji}</span>
+              <span style={{ fontSize: 12, fontWeight: 'bold', color: c.color }}>{c.name}</span>
+            </button>
+          ))}
+        </div>
+        {selectedCharIdx >= 0 && (
+          <button onClick={() => { selectedCharRef.current = selectedCharIdx; setScreen('game'); }}
+            style={{
+              marginTop: 20, padding: '14px 48px', borderRadius: 24, border: 'none',
+              background: PLAYABLE_CHARS[selectedCharIdx].color, color: '#fff',
+              fontSize: 18, fontWeight: 'bold', cursor: 'pointer',
+              boxShadow: `0 4px 15px ${PLAYABLE_CHARS[selectedCharIdx].color}66`,
+            }}>
+            시작하기! 🎮
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <canvas

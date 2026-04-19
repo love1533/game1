@@ -3,10 +3,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "미니게임월드",
-  description: "승민 건우 강우 수현 이현 준영 준우의 미니게임 모음! 🎮",
+  description: "놀면서 배우는 재미있는 미니게임 모음! 영어, 수학, 퀴즈, 리듬게임 등 12가지 🎮",
+  keywords: "미니게임,교육게임,영어게임,수학게임,초등교육,어린이게임",
   openGraph: {
     title: "🎮 미니게임월드",
-    description: "13가지 미니게임으로 신나게 놀자! 점프, 달리기, 퀴즈, 슈팅, 탕후루 등",
+    description: "놀면서 배우는 재미있는 미니게임 12종! 영어, 수학, 퀴즈, 슈팅, 탕후루 등",
     type: "website",
   },
 };
@@ -25,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" className="h-full">
-      <body className="min-h-full flex flex-col bg-gradient-to-b from-purple-100 via-pink-50 to-blue-100">
+      <body className="min-h-full flex flex-col bg-[#f0f4ff]">
         {children}
       </body>
     </html>

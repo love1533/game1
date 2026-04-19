@@ -204,14 +204,14 @@ function playCelebration(ctx: AudioContext) {
   });
 }
 
-function speakWord(text: string) {
+function speakWord(word: string) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return;
   window.speechSynthesis.cancel();
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.lang = 'en-US';
-  utt.rate = 0.85;
-  utt.pitch = 1.1;
-  window.speechSynthesis.speak(utt);
+  const utterance = new SpeechSynthesisUtterance(word);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.8;
+  utterance.pitch = 1.1;
+  window.speechSynthesis.speak(utterance);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -342,10 +342,6 @@ export default function EnglishWordMasterPage() {
     timeLeftRef.current = TIMER_SECONDS;
     setFeedbackText('');
 
-    if (mode === 'listening') {
-      setTimeout(() => speakWord(word.english), 400);
-    }
-
     stopTimer();
     timerRef.current = setInterval(() => {
       timeLeftRef.current -= 1;
@@ -451,6 +447,14 @@ export default function EnglishWordMasterPage() {
       setFeedbackText(WRONG_MESSAGES[Math.floor(Math.random() * WRONG_MESSAGES.length)]);
     }
 
+    // For listening mode: pre-speak the next word NOW (in user-gesture context)
+    // so mobile Safari allows it. We peek at the next question index.
+    const nextQPeek = currentQRef.current + 1;
+    if (gameModeRef.current === 'listening' && nextQPeek < TOTAL_QUESTIONS) {
+      const nextWord = questionsRef.current[nextQPeek];
+      if (nextWord) speakWord(nextWord.english);
+    }
+
     // Advance after delay
     setTimeout(() => {
       const nextQ = currentQRef.current + 1;
@@ -551,7 +555,7 @@ export default function EnglishWordMasterPage() {
         const cx = startX + col * (cardW + 12);
         const cy = startY + row * (cardH + 14);
         const hover = hoverCharRef.current === i;
-        const selected = selectedChar === i;
+        const selected = selectedCharRef.current === i;
 
         ctx.save();
         if (hover || selected) {
@@ -592,8 +596,8 @@ export default function EnglishWordMasterPage() {
       });
 
       // Start button
-      if (selectedChar >= 0) {
-        const char = CHARACTERS[selectedChar];
+      if (selectedCharRef.current >= 0) {
+        const char = CHARACTERS[selectedCharRef.current];
         const btnW = Math.min(W * 0.55, 240);
         const btnH = 54;
         const bx = (W - btnW) / 2;
@@ -626,8 +630,8 @@ export default function EnglishWordMasterPage() {
       drawBackground();
       const W = canvas.width, H = canvas.height;
 
-      if (selectedChar >= 0) {
-        const char = CHARACTERS[selectedChar];
+      if (selectedCharRef.current >= 0) {
+        const char = CHARACTERS[selectedCharRef.current];
         ctx.font = `${Math.min(W * 0.12, 60)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1214,7 +1218,15 @@ export default function EnglishWordMasterPage() {
       for (let i = 0; i < modes.length; i++) {
         const cy = startY + i * (cardH + 16);
         if (x >= cx && x <= cx + cardW && y >= cy && y <= cy + cardH) {
-          startGame(selectedCharRef.current, modes[i]);
+          const selectedMode = modes[i];
+          startGame(selectedCharRef.current, selectedMode);
+          // For listening mode: speak Q0 immediately in user-gesture context
+          // (startGame shuffles the words into questionsRef, then advanceQuestion
+          //  runs via setTimeout — but that loses the gesture context on iOS Safari)
+          if (selectedMode === 'listening') {
+            const qs = questionsRef.current;
+            if (qs.length > 0) speakWord(qs[0].english);
+          }
           return;
         }
       }
