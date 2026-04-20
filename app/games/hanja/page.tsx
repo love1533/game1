@@ -43,9 +43,9 @@ const characters: Character[] = [
   { name: '준우', emoji: '✈️', color: '#0EA5E9' },
 ];
 
-const LEVEL_ORDER = ['8', '준7', '7', '준6', '6'];
-const BASE_POINTS: Record<string, number> = { '8': 20, '준7': 25, '7': 30, '준6': 40, '6': 50 };
-const TIMER_BY_LEVEL: Record<string, number> = { '8': 15, '준7': 13, '7': 12, '준6': 10, '6': 10 };
+const LEVEL_ORDER = ['8', '준7', '7', '준6', '6', '준5', '5', '준4', '4', '준3', '3', '2', '1'];
+const BASE_POINTS: Record<string, number> = { '8': 20, '준7': 25, '7': 30, '준6': 40, '6': 50, '준5': 60, '5': 80, '준4': 100, '4': 120, '준3': 150, '3': 200, '2': 250, '1': 500 };
+const TIMER_BY_LEVEL: Record<string, number> = { '8': 15, '준7': 13, '7': 12, '준6': 10, '6': 10, '준5': 10, '5': 9, '준4': 8, '4': 8, '준3': 7, '3': 7, '2': 6, '1': 6 };
 
 // ─── Audio ──────────────────────────────────────────────────────────
 function playSound(type: 'correct' | 'wrong' | 'combo' | 'levelup' | 'gameover') {
