@@ -1,184 +1,243 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo, Suspense } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Html, Text } from '@react-three/drei';
+import { create } from 'zustand';
+import * as THREE from 'three';
 import { saveScore } from '@/lib/ranking';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type GamePhase = 'intro' | 'playing' | 'ending';
+type Vec3 = [number, number, number];
+type ToolId = 'stethoscope' | 'syringe' | 'pill' | 'bandage';
+type SymptomId = 'fever' | 'wound' | 'cough' | 'fracture';
+type RoomId = 'reception' | 'clinic' | 'injection' | 'surgery' | 'pharmacy' | 'ward';
+type PatientState = 'waiting' | 'treated' | 'discharged';
+type GamePhase = 'menu' | 'playing' | 'dayComplete' | 'boss' | 'gameOver' | 'victory';
 
-// Sub-states within 'playing'
-type TreatPhase =
-  | 'entering'      // patient slides in
-  | 'talking'       // speech bubble shown, waiting for user to start
-  | 'stethoscope'   // must tap stethoscope tool then tap patient
-  | 'treatment'     // drag correct tool to highlighted area
-  | 'medicine'      // drag pill to patient
-  | 'celebrating';  // brief celebration before next patient
-
-interface Tool {
+interface ToolDef {
   id: ToolId;
+  name: string;
+  emoji: string;
+  color: string;
+  cures: SymptomId;
+}
+
+interface SymptomDef {
+  id: SymptomId;
   emoji: string;
   name: string;
+  hint: string;
+  requiredTool: ToolId;
+  needsEscort?: boolean;
 }
 
-type ToolId = 'stethoscope' | 'bandage' | 'cast' | 'disinfect' | 'plaster' | 'pill';
-
-interface DragState {
-  toolId: ToolId;
-  x: number;
-  y: number;
-  startX: number;
-  startY: number;
+interface RoomDef {
+  id: RoomId;
+  name: string;
+  color: string;
+  wallColor: string;
+  position: Vec3;      // world position center
+  size: Vec3;          // width, height(y), depth
+  connections: { dir: 'north' | 'south' | 'east' | 'west'; to: RoomId }[];
+  furniture: { type: string; pos: Vec3; size: Vec3; color: string }[];
+  spawnPoints: Vec3[];
 }
 
-interface Sparkle {
-  x: number; y: number;
-  vx: number; vy: number;
-  color: string; size: number;
-  alpha: number; life: number;
+interface PatientData {
+  id: string;
+  name: string;
+  color: string;
+  symptom: SymptomId;
+  roomId: RoomId;
+  position: Vec3;
+  state: PatientState;
+  isEmergency: boolean;
+  emergencyTimer: number;
+  wrongToolTimer: number;
+  healAnim: number;
+  escorting: boolean;
 }
 
-interface FloatingText {
-  text: string; x: number; y: number;
-  vy: number; alpha: number; color: string; size: number;
-}
-
-interface PatientState {
-  // which treat zones are done
-  zonesDone: Set<string>;
-  // set of sub-steps completed for stethoscope-first approach
-  stethoscopeDone: boolean;
-  // for stage 2: both ears; track individually
-  leftEarDone: boolean;
-  rightEarDone: boolean;
-  // for stage 5: disinfect before plaster
-  disinfectDone: boolean;
+interface DayConfig {
+  day: number;
+  title: string;
+  patientCount: number;
+  availableSymptoms: SymptomId[];
+  unlockedTools: ToolId[];
+  timeLimit?: number;
+  bossEvent?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+const PLAYER_SPEED = 4;
+const DASH_SPEED = 7;
+const DASH_DURATION = 0.3;
+const DASH_COOLDOWN = 1.5;
+const INTERACT_RANGE = 1.8;
+const BATTERY_MAX = 100;
+const BATTERY_DRAIN = 0.15;
+const BATTERY_HEAL_BONUS = 15;
 
-const TOOLS: Tool[] = [
-  { id: 'stethoscope', emoji: '🩺', name: '청진기' },
-  { id: 'bandage',     emoji: '🩹', name: '붕대' },
-  { id: 'cast',        emoji: '🦴', name: '깁스' },
-  { id: 'disinfect',   emoji: '🧴', name: '소독약' },
-  { id: 'plaster',     emoji: '🤕', name: '반창고' },
-  { id: 'pill',        emoji: '💊', name: '약' },
+const CAMERA_OFFSET: Vec3 = [0, 8, 6];
+const CAMERA_LERP = 0.08;
+
+const COLORS = {
+  primary: '#FF6B6B',
+  secondary: '#4ECDC4',
+  accent: '#FFE66D',
+  success: '#95E1D3',
+  warning: '#F38181',
+  floor: '#E8E8E8',
+  wall: '#F7F7F7',
+};
+
+const TOOLS: ToolDef[] = [
+  { id: 'stethoscope', name: '청진기', emoji: '🩺', color: '#4ECDC4', cures: 'fever' },
+  { id: 'pill',        name: '약',     emoji: '💊', color: '#FFE66D', cures: 'fever' },
+  { id: 'bandage',     name: '붕대',   emoji: '🩹', color: '#FF9FF3', cures: 'wound' },
+  { id: 'syringe',     name: '주사기', emoji: '💉', color: '#74B9FF', cures: 'cough' },
 ];
 
-const TOOL_COUNT = TOOLS.length;
+const SYMPTOMS: Record<SymptomId, SymptomDef> = {
+  fever:    { id: 'fever',    emoji: '🤒', name: '열',   hint: '청진기로 진찰하세요', requiredTool: 'stethoscope' },
+  wound:    { id: 'wound',    emoji: '🩹', name: '상처', hint: '붕대를 감아주세요',   requiredTool: 'bandage' },
+  cough:    { id: 'cough',    emoji: '😷', name: '기침', hint: '주사를 놓아주세요',   requiredTool: 'syringe' },
+  fracture: { id: 'fracture', emoji: '🦴', name: '골절', hint: '수술실로 이송하세요', requiredTool: 'bandage', needsEscort: true },
+};
 
-// Pastel colors
-const COLOR_BG        = '#E8FFF5';
-const COLOR_PINK_BG   = '#FFF0F5';
-const COLOR_TRAY      = '#FFF8E8';
-const COLOR_GLOW_HURT = '#FF6B6B';
-const COLOR_GLOW_OK   = '#55EFC4';
-const COLOR_STICKER   = '#FFD700';
-const COLOR_SPEECH_BG = '#FFFFFF';
+const PATIENT_COLORS = ['#FF6B6B', '#74B9FF', '#A29BFE', '#FFEAA7', '#55EFC4', '#FD79A8', '#81ECEC', '#DFE6E9'];
+const PATIENT_NAMES = ['민수', '서연', '준호', '지은', '하늘', '곰돌이', '토끼', '냥이'];
 
-// Stage definitions
-interface Stage {
-  patientEmoji: string;
-  patientName: string;
-  entryLine: string;
-  completeLine: string;
-  symptom: string;
-  // Which zones exist and what tool heals each
-  zones: ZoneDef[];
-  // After zones: what extra steps are needed?
-  // 'bandage_both_ears' means left + right ear each need bandage
-  specialMode?: 'bandage_both_ears' | 'order_disinfect_plaster' | 'wrong_tool_cast';
-}
+const ROOM_SIZE = 8;
+const WALL_H = 3;
+const DOOR_W = 1.8;
 
-interface ZoneDef {
-  key: string;         // e.g. 'shoulder', 'left_ear', 'right_ear', 'tail', 'trunk', 'knee'
-  label: string;
-  requiredTool: ToolId;
-  // relative position on patient body (0–1 of patientR radius, angle in radians)
-  angle: number;       // angle from center
-  dist: number;        // fraction of radius
-  zoneR: number;       // fraction of patientR for hit radius
-}
+// Room layout (world positions):
+//        [reception (0,0,0)]
+//               |
+//        [clinic (0,0,-10)] ---- [injection (10,0,-10)]
+//               |                       |
+//        [surgery (0,0,-20)] ---- [pharmacy (10,0,-20)]
+//               |
+//        [ward (0,0,-30)]
 
-const STAGES: Stage[] = [
-  // Stage 1: 곰돌이
+const ROOMS: RoomDef[] = [
   {
-    patientEmoji: '🐻',
-    patientName: '곰돌이',
-    entryLine: '선생님~ 어깨가 너무 아파요. 꿀단지 들다가 삐끗했어요.',
-    completeLine: '와! 이제 꿀단지도 번쩍 들 수 있어요!',
-    symptom: '왼쪽 어깨가 아파요',
-    zones: [
-      { key: 'shoulder', label: '어깨', requiredTool: 'pill', angle: -Math.PI * 0.7, dist: 0.6, zoneR: 0.32 },
+    id: 'reception', name: '접수/대기실',
+    color: '#E8F5E9', wallColor: '#81C784',
+    position: [0, 0, 0], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
+    connections: [{ dir: 'south', to: 'clinic' }],
+    furniture: [
+      { type: 'desk', pos: [2.5, 0.4, -2], size: [1.5, 0.8, 0.8], color: '#8D6E63' },
+      { type: 'chair', pos: [-2, 0.3, -1], size: [0.6, 0.6, 0.6], color: '#42A5F5' },
+      { type: 'chair', pos: [-2, 0.3, 1], size: [0.6, 0.6, 0.6], color: '#42A5F5' },
+      { type: 'chair', pos: [0, 0.3, 2], size: [0.6, 0.6, 0.6], color: '#66BB6A' },
+      { type: 'plant', pos: [3, 0.6, 3], size: [0.5, 1.2, 0.5], color: '#4CAF50' },
     ],
-    // stage 1 only needs stethoscope + pill (no extra drag zone, pill is the "zone")
+    spawnPoints: [[-1, 0, -1], [1, 0, 1], [-2, 0, 2]],
   },
-  // Stage 2: 토끼
   {
-    patientEmoji: '🐰',
-    patientName: '토끼',
-    entryLine: '선생님... 친구랑 놀다가 양쪽 귀를 다쳤어요.',
-    completeLine: '귀가 다시 쫑긋~ 고마워요!',
-    symptom: '양쪽 귀가 아파요',
-    zones: [
-      { key: 'left_ear',  label: '왼쪽 귀', requiredTool: 'bandage', angle: -Math.PI * 0.85, dist: 0.85, zoneR: 0.28 },
-      { key: 'right_ear', label: '오른쪽 귀', requiredTool: 'bandage', angle: -Math.PI * 0.15, dist: 0.85, zoneR: 0.28 },
+    id: 'clinic', name: '진료실',
+    color: '#E3F2FD', wallColor: '#64B5F6',
+    position: [0, 0, -10], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
+    connections: [
+      { dir: 'north', to: 'reception' },
+      { dir: 'east', to: 'injection' },
+      { dir: 'south', to: 'surgery' },
     ],
-    specialMode: 'bandage_both_ears',
+    furniture: [
+      { type: 'bed', pos: [1.5, 0.35, -1], size: [1.8, 0.7, 0.9], color: '#E3F2FD' },
+      { type: 'desk', pos: [-2.5, 0.4, -2.5], size: [1.2, 0.8, 0.8], color: '#795548' },
+      { type: 'cabinet', pos: [-3, 0.8, 0], size: [0.6, 1.6, 0.6], color: '#ECEFF1' },
+    ],
+    spawnPoints: [[0, 0, 0], [2, 0, 1], [-1, 0, 2]],
   },
-  // Stage 3: 고양이
   {
-    patientEmoji: '🐱',
-    patientName: '고양이',
-    entryLine: '야옹~ 꼬리가 문에 끼었어요...',
-    completeLine: '꼬리를 살랑살랑~ 이제 안 아파요!',
-    symptom: '꼬리가 아파요',
-    zones: [
-      { key: 'tail', label: '꼬리', requiredTool: 'bandage', angle: Math.PI * 0.6, dist: 0.8, zoneR: 0.28 },
+    id: 'injection', name: '주사실',
+    color: '#FFF3E0', wallColor: '#FFB74D',
+    position: [10, 0, -10], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
+    connections: [
+      { dir: 'west', to: 'clinic' },
+      { dir: 'south', to: 'pharmacy' },
     ],
+    furniture: [
+      { type: 'bed', pos: [0, 0.35, -1], size: [1.8, 0.7, 0.9], color: '#FFF3E0' },
+      { type: 'cabinet', pos: [3, 0.8, -3], size: [0.6, 1.6, 0.6], color: '#ECEFF1' },
+      { type: 'table', pos: [-2, 0.35, -2], size: [0.8, 0.7, 0.6], color: '#BDBDBD' },
+    ],
+    spawnPoints: [[1, 0, 0], [-1, 0, 1], [2, 0, 2]],
   },
-  // Stage 4: 코끼리
   {
-    patientEmoji: '🐘',
-    patientName: '코끼리',
-    entryLine: '뿌우~ 코로 무거운 거 들다가 삐었어요!',
-    completeLine: '뿌우우~! 코가 튼튼해졌어요!',
-    symptom: '코(코끝)가 아파요',
-    zones: [
-      { key: 'trunk', label: '코', requiredTool: 'cast', angle: Math.PI * 0.25, dist: 0.65, zoneR: 0.3 },
+    id: 'surgery', name: '수술실',
+    color: '#FCE4EC', wallColor: '#F06292',
+    position: [0, 0, -20], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
+    connections: [
+      { dir: 'north', to: 'clinic' },
+      { dir: 'east', to: 'pharmacy' },
+      { dir: 'south', to: 'ward' },
     ],
-    specialMode: 'wrong_tool_cast',
+    furniture: [
+      { type: 'bed', pos: [0, 0.35, 0], size: [2, 0.7, 1], color: '#F8BBD0' },
+      { type: 'light', pos: [0, 2.5, 0], size: [0.8, 0.1, 0.8], color: '#FFF9C4' },
+      { type: 'cabinet', pos: [-3, 0.8, -3], size: [0.6, 1.6, 0.6], color: '#ECEFF1' },
+    ],
+    spawnPoints: [[-2, 0, 1], [2, 0, -2], [2, 0, 2]],
   },
-  // Stage 5: 어린이
   {
-    patientEmoji: '🧒',
-    patientName: '어린이',
-    entryLine: '으앙~ 뛰다가 넘어졌어요! 무릎에서 피가 나요!',
-    completeLine: '하나도 안 아파요! 선생님 최고!',
-    symptom: '무릎에서 피가 나요',
-    zones: [
-      // disinfect first, then plaster
-      { key: 'knee_disinfect', label: '무릎 소독', requiredTool: 'disinfect', angle: Math.PI * 0.15, dist: 0.7, zoneR: 0.3 },
-      { key: 'knee_plaster',   label: '무릎 반창고', requiredTool: 'plaster',   angle: Math.PI * 0.15, dist: 0.7, zoneR: 0.3 },
+    id: 'pharmacy', name: '약국',
+    color: '#F3E5F5', wallColor: '#BA68C8',
+    position: [10, 0, -20], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
+    connections: [
+      { dir: 'north', to: 'injection' },
+      { dir: 'west', to: 'surgery' },
     ],
-    specialMode: 'order_disinfect_plaster',
+    furniture: [
+      { type: 'shelf', pos: [-3, 1, -2], size: [0.5, 2, 2], color: '#CE93D8' },
+      { type: 'shelf', pos: [3, 1, -2], size: [0.5, 2, 2], color: '#CE93D8' },
+      { type: 'counter', pos: [0, 0.5, 2], size: [3, 1, 0.8], color: '#8E24AA' },
+    ],
+    spawnPoints: [[0, 0, 0], [-1, 0, -1], [1, 0, 1]],
+  },
+  {
+    id: 'ward', name: '입원실',
+    color: '#FFFDE7', wallColor: '#FFF176',
+    position: [0, 0, -30], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
+    connections: [{ dir: 'north', to: 'surgery' }],
+    furniture: [
+      { type: 'bed', pos: [-2.5, 0.35, -2], size: [1.6, 0.7, 0.9], color: '#FFF9C4' },
+      { type: 'bed', pos: [2.5, 0.35, -2], size: [1.6, 0.7, 0.9], color: '#FFF9C4' },
+      { type: 'bed', pos: [-2.5, 0.35, 2], size: [1.6, 0.7, 0.9], color: '#FFF9C4' },
+      { type: 'bed', pos: [2.5, 0.35, 2], size: [1.6, 0.7, 0.9], color: '#FFF9C4' },
+      { type: 'flower', pos: [0, 0.5, 0], size: [0.4, 1, 0.4], color: '#FF8A80' },
+    ],
+    spawnPoints: [[-1, 0, -1], [1, 0, -1], [-1, 0, 2], [1, 0, 2]],
   },
 ];
 
-const TOTAL_STAGES = STAGES.length;
+const ROOM_MAP: Record<RoomId, RoomDef> = {} as Record<RoomId, RoomDef>;
+ROOMS.forEach(r => { ROOM_MAP[r.id] = r; });
 
-const HEART_COLORS = ['#FF6B9D', '#FF9F43', '#FFEAA7', '#55EFC4', '#74B9FF', '#A29BFE'];
+const DAYS: DayConfig[] = [
+  { day: 1, title: '첫 출근!',           patientCount: 2, availableSymptoms: ['fever'],                              unlockedTools: ['stethoscope', 'pill'] },
+  { day: 2, title: '바빠지는 병원',       patientCount: 3, availableSymptoms: ['fever', 'wound'],                     unlockedTools: ['stethoscope', 'pill', 'bandage'] },
+  { day: 3, title: '응급 환자!',          patientCount: 4, availableSymptoms: ['fever', 'wound', 'cough'],            unlockedTools: ['stethoscope', 'pill', 'bandage', 'syringe'] },
+  { day: 4, title: '병원이 가득',          patientCount: 5, availableSymptoms: ['fever', 'wound', 'cough', 'fracture'], unlockedTools: ['stethoscope', 'pill', 'bandage', 'syringe'] },
+  { day: 5, title: '로봇 바이러스!',       patientCount: 3, availableSymptoms: ['fever', 'wound', 'cough'],            unlockedTools: ['stethoscope', 'pill', 'bandage', 'syringe'], bossEvent: true },
+];
 
 // ─── Audio ────────────────────────────────────────────────────────────────────
-function makeAudio(): AudioContext | null {
-  try {
-    return new (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-  } catch { return null; }
+let audioCtx: AudioContext | null = null;
+function getAudio(): AudioContext | null {
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    } catch { return null; }
+  }
+  return audioCtx;
 }
 
-function tone(ctx: AudioContext, freq: number, start: number, dur: number, vol = 0.18, type: OscillatorType = 'sine') {
+function tone(ctx: AudioContext, freq: number, start: number, dur: number, vol = 0.12, type: OscillatorType = 'sine') {
   const osc = ctx.createOscillator();
   const g = ctx.createGain();
   osc.connect(g).connect(ctx.destination);
@@ -190,1362 +249,1611 @@ function tone(ctx: AudioContext, freq: number, start: number, dur: number, vol =
   osc.stop(start + dur + 0.02);
 }
 
-function playDoorbell(ctx: AudioContext) {
+function sfxHeal() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
-  tone(ctx, 880, now, 0.25);
-  tone(ctx, 1109, now + 0.28, 0.3);
+  [523, 659, 784, 1047].forEach((f, i) => tone(ctx, f, now + i * 0.08, 0.2, 0.1, 'triangle'));
 }
 
-function playSuccess(ctx: AudioContext) {
+function sfxWrong() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
-  [523, 659, 784, 1047].forEach((f, i) => tone(ctx, f, now + i * 0.08, 0.2, 0.15, 'triangle'));
+  tone(ctx, 220, now, 0.12, 0.1, 'square');
+  tone(ctx, 180, now + 0.12, 0.15, 0.08, 'square');
 }
 
-function playWrong(ctx: AudioContext) {
+function sfxDoor() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
-  tone(ctx, 220, now, 0.15, 0.15, 'square');
-  tone(ctx, 180, now + 0.15, 0.2, 0.12, 'square');
+  tone(ctx, 600, now, 0.08, 0.06);
+  tone(ctx, 800, now + 0.08, 0.1, 0.06);
 }
 
-function playDisinfect(ctx: AudioContext) {
+function sfxDash() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
   const osc = ctx.createOscillator();
   const g = ctx.createGain();
   osc.connect(g).connect(ctx.destination);
   osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(600, now);
-  osc.frequency.exponentialRampToValueAtTime(200, now + 0.15);
-  g.gain.setValueAtTime(0.12, now);
-  g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-  osc.start(now); osc.stop(now + 0.2);
+  osc.frequency.setValueAtTime(800, now);
+  osc.frequency.exponentialRampToValueAtTime(200, now + 0.12);
+  g.gain.setValueAtTime(0.06, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+  osc.start(now); osc.stop(now + 0.17);
 }
 
-function playGulp(ctx: AudioContext) {
+function sfxDayComplete() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
-  [400, 300, 200, 150].forEach((f, i) => tone(ctx, f, now + i * 0.06, 0.08, 0.14, 'sine'));
+  [523, 587, 659, 698, 784, 880, 988, 1047].forEach((f, i) =>
+    tone(ctx, f, now + i * 0.07, 0.2, 0.1, 'triangle'));
+  [523, 659, 784].forEach(f => tone(ctx, f, now + 0.65, 0.5, 0.08, 'sine'));
 }
 
-function playFanfare(ctx: AudioContext) {
+function sfxBossHit() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
-  [523, 659, 784, 880, 1047].forEach((f, i) => tone(ctx, f, now + i * 0.1, 0.22, 0.16, 'triangle'));
+  tone(ctx, 150, now, 0.1, 0.12, 'square');
+  tone(ctx, 100, now + 0.05, 0.15, 0.1, 'sawtooth');
 }
 
-function playCelebration(ctx: AudioContext) {
+function sfxVictory() {
+  const ctx = getAudio(); if (!ctx) return;
   const now = ctx.currentTime;
-  const scale = [523, 587, 659, 698, 784, 880, 988, 1047];
-  scale.forEach((f, i) => tone(ctx, f, now + i * 0.07, 0.2, 0.15, 'triangle'));
-  // Chord
-  [523, 659, 784].forEach(f => tone(ctx, f, now + 0.7, 0.5, 0.12, 'sine'));
+  [523, 659, 784, 880, 1047, 1319].forEach((f, i) =>
+    tone(ctx, f, now + i * 0.12, 0.3, 0.12, 'triangle'));
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+// ─── Zustand Store ────────────────────────────────────────────────────────────
+interface GameStore {
+  phase: GamePhase;
+  currentDay: number;
+  playerName: string;
+  playerPos: Vec3;
+  playerRotation: number;
+  playerRoom: RoomId;
+  battery: number;
+  score: number;
+  stars: number;
+  activeTool: number; // index into unlocked tools
+  patients: PatientData[];
+  escortingId: string | null;
+  dashCooldown: number;
+  message: string;
+  bossHp: number;
+  bossMaxHp: number;
+  bossBullets: { x: number; z: number; vx: number; vz: number }[];
+
+  setPhase: (p: GamePhase) => void;
+  setPlayerPos: (p: Vec3) => void;
+  setPlayerRotation: (r: number) => void;
+  setPlayerRoom: (r: RoomId) => void;
+  setBattery: (b: number) => void;
+  setScore: (s: number) => void;
+  setActiveTool: (t: number) => void;
+  setMessage: (m: string) => void;
+  setDashCooldown: (d: number) => void;
+
+  startGame: (name: string) => void;
+  startDay: (dayIdx: number) => void;
+  interact: () => void;
+  nextDay: () => void;
 }
 
-function emoji(ctx: CanvasRenderingContext2D, e: string, x: number, y: number, size: number) {
-  ctx.save();
-  ctx.font = `${size}px serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(e, x, y);
-  ctx.restore();
+function randomFrom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function generatePatients(dayConfig: DayConfig): PatientData[] {
+  const patients: PatientData[] = [];
+  const roomIds: RoomId[] = ['reception', 'clinic', 'injection', 'surgery', 'pharmacy', 'ward'];
+  let emergencyPlaced = false;
+
+  for (let i = 0; i < dayConfig.patientCount; i++) {
+    const symptom = randomFrom(dayConfig.availableSymptoms);
+    const room = roomIds[i % roomIds.length];
+    const roomDef = ROOM_MAP[room];
+    const sp = roomDef.spawnPoints[i % roomDef.spawnPoints.length];
+    const isEmergency = dayConfig.day >= 3 && !emergencyPlaced && i === dayConfig.patientCount - 1;
+    if (isEmergency) emergencyPlaced = true;
+
+    patients.push({
+      id: `p${i}`,
+      name: PATIENT_NAMES[i % PATIENT_NAMES.length],
+      color: PATIENT_COLORS[i % PATIENT_COLORS.length],
+      symptom,
+      roomId: room,
+      position: [roomDef.position[0] + sp[0], sp[1], roomDef.position[2] + sp[2]],
+      state: 'waiting',
+      isEmergency,
+      emergencyTimer: isEmergency ? 30 : 0,
+      wrongToolTimer: 0,
+      healAnim: 0,
+      escorting: false,
+    });
+  }
+  return patients;
 }
 
-function dist(x1: number, y1: number, x2: number, y2: number) {
-  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+const useGameStore = create<GameStore>((set, get) => ({
+  phase: 'menu',
+  currentDay: 0,
+  playerName: '',
+  playerPos: [0, 0, 2],
+  playerRotation: 0,
+  playerRoom: 'reception',
+  battery: BATTERY_MAX,
+  score: 0,
+  stars: 0,
+  activeTool: 0,
+  patients: [],
+  escortingId: null,
+  dashCooldown: 0,
+  message: '',
+  bossHp: 5,
+  bossMaxHp: 5,
+  bossBullets: [],
+
+  setPhase: (p) => set({ phase: p }),
+  setPlayerPos: (p) => set({ playerPos: p }),
+  setPlayerRotation: (r) => set({ playerRotation: r }),
+  setPlayerRoom: (r) => set({ playerRoom: r }),
+  setBattery: (b) => set({ battery: Math.max(0, Math.min(BATTERY_MAX, b)) }),
+  setScore: (s) => set({ score: s }),
+  setActiveTool: (t) => set({ activeTool: t }),
+  setMessage: (m) => set({ message: m }),
+  setDashCooldown: (d) => set({ dashCooldown: d }),
+
+  startGame: (name: string) => {
+    set({ playerName: name, score: 0, stars: 0 });
+    get().startDay(0);
+  },
+
+  startDay: (dayIdx: number) => {
+    const config = DAYS[dayIdx];
+    const patients = generatePatients(config);
+    set({
+      currentDay: dayIdx,
+      phase: 'playing',
+      playerPos: [0, 0, 2],
+      playerRoom: 'reception',
+      playerRotation: 0,
+      battery: BATTERY_MAX,
+      activeTool: 0,
+      patients,
+      escortingId: null,
+      dashCooldown: 0,
+      message: `Day ${dayIdx + 1}: ${config.title}`,
+      bossHp: 5,
+      bossMaxHp: 5,
+      bossBullets: [],
+    });
+  },
+
+  interact: () => {
+    const state = get();
+    if (state.phase !== 'playing' && state.phase !== 'boss') return;
+
+    const [px, , pz] = state.playerPos;
+    const dayConfig = DAYS[state.currentDay];
+    const unlockedTools = dayConfig.unlockedTools;
+
+    // Boss interaction
+    if (state.phase === 'boss') {
+      const bossRoom = ROOM_MAP['surgery'];
+      const bx = bossRoom.position[0];
+      const bz = bossRoom.position[2];
+      const dist = Math.sqrt((px - bx) ** 2 + (pz - bz) ** 2);
+      if (dist < 2.5) {
+        const newHp = state.bossHp - 1;
+        sfxBossHit();
+        if (newHp <= 0) {
+          sfxVictory();
+          set({
+            bossHp: 0,
+            score: state.score + 500,
+            message: '보스 처치! +500점!',
+          });
+          setTimeout(() => {
+            set({ phase: 'victory' });
+          }, 2000);
+        } else {
+          set({ bossHp: newHp, message: `보스 HP: ${newHp}/${state.bossMaxHp}` });
+        }
+      }
+      return;
+    }
+
+    // Find closest patient
+    const nearby = state.patients
+      .filter(p => p.state === 'waiting')
+      .map(p => ({
+        ...p,
+        dist: Math.sqrt((px - p.position[0]) ** 2 + (pz - p.position[2]) ** 2),
+      }))
+      .filter(p => p.dist < INTERACT_RANGE)
+      .sort((a, b) => a.dist - b.dist);
+
+    if (nearby.length === 0) return;
+    const target = nearby[0];
+
+    // Fracture: escort logic
+    if (target.symptom === 'fracture' && !target.escorting && state.playerRoom !== 'surgery') {
+      const newPatients = state.patients.map(p =>
+        p.id === target.id ? { ...p, escorting: true } : p
+      );
+      set({ patients: newPatients, escortingId: target.id, message: '수술실로 이송하세요!' });
+      return;
+    }
+
+    if (target.symptom === 'fracture' && target.escorting && state.playerRoom === 'surgery') {
+      const newPatients = state.patients.map(p =>
+        p.id === target.id ? { ...p, state: 'treated' as PatientState, healAnim: 1 } : p
+      );
+      sfxHeal();
+      const points = target.isEmergency ? 200 : 150;
+      set({
+        patients: newPatients,
+        escortingId: null,
+        score: state.score + points,
+        battery: Math.min(BATTERY_MAX, state.battery + BATTERY_HEAL_BONUS),
+        message: `골절 치료 완료! +${points}`,
+      });
+      checkDayComplete(set, get);
+      return;
+    }
+
+    // Normal treatment
+    const activeTool = unlockedTools[state.activeTool % unlockedTools.length];
+    const symptom = SYMPTOMS[target.symptom];
+
+    if (activeTool === symptom.requiredTool) {
+      const newPatients = state.patients.map(p =>
+        p.id === target.id ? { ...p, state: 'treated' as PatientState, healAnim: 1 } : p
+      );
+      sfxHeal();
+      const points = target.isEmergency ? 200 : 100;
+      set({
+        patients: newPatients,
+        score: state.score + points,
+        battery: Math.min(BATTERY_MAX, state.battery + BATTERY_HEAL_BONUS),
+        message: `${target.name} 치료 완료! +${points}`,
+      });
+      checkDayComplete(set, get);
+    } else {
+      const newPatients = state.patients.map(p =>
+        p.id === target.id ? { ...p, wrongToolTimer: 1 } : p
+      );
+      sfxWrong();
+      set({ patients: newPatients, message: `틀린 도구! ${symptom.hint}` });
+    }
+  },
+
+  nextDay: () => {
+    const state = get();
+    const nextIdx = state.currentDay + 1;
+    if (nextIdx < DAYS.length) {
+      get().startDay(nextIdx);
+    }
+  },
+}));
+
+function checkDayComplete(
+  set: (partial: Partial<GameStore>) => void,
+  get: () => GameStore,
+) {
+  const state = get();
+  const allTreated = state.patients.every(p => p.state === 'treated');
+  if (!allTreated) return;
+
+  const dayConfig = DAYS[state.currentDay];
+
+  if (dayConfig.bossEvent) {
+    set({
+      phase: 'boss',
+      playerRoom: 'surgery',
+      playerPos: [0, 0, -18],
+      message: '로봇 바이러스 등장!',
+      bossHp: 5,
+      bossBullets: [],
+    });
+    return;
+  }
+
+  const bonus = Math.round(state.battery * 2);
+  sfxDayComplete();
+  set({
+    phase: 'dayComplete',
+    score: state.score + bonus,
+    stars: state.stars + 1,
+    message: `Day ${state.currentDay + 1} 클리어! 배터리 보너스 +${bonus}`,
+  });
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-export default function HospitalPage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const audioRef  = useRef<AudioContext | null>(null);
+// ─── Input System ─────────────────────────────────────────────────────────────
+const keysPressed = new Set<string>();
+let joystickDx = 0;
+let joystickDy = 0;
+let joystickActive = false;
 
-  // ── Phase state ─────────────────────────────────────────────────────────────
-  const [phase, setPhase] = useState<GamePhase>('intro');
-  const phaseRef = useRef<GamePhase>('intro');
+// ─── 3D Components ────────────────────────────────────────────────────────────
 
-  // ── Game state (all in refs to avoid re-render churn inside rAF) ─────────────
-  const stageRef      = useRef(0);           // current stage 0-4
-  const treatPhaseRef = useRef<TreatPhase>('entering');
-  const scoreRef      = useRef(0);
-  const stickersRef   = useRef(0);
-  const firstTryRef   = useRef(true);        // for current step
-  const patStateRef   = useRef<PatientState>({
-    zonesDone: new Set(), stethoscopeDone: false,
-    leftEarDone: false, rightEarDone: false, disinfectDone: false,
+// Floor/wall material cache
+const floorMat = new THREE.MeshStandardMaterial({ color: COLORS.floor, roughness: 0.8 });
+
+function Room3D({ room }: { room: RoomDef }) {
+  const [rx, , rz] = room.position;
+  const halfW = room.size[0] / 2;
+  const halfD = room.size[2] / 2;
+  const wallH = room.size[1];
+  const wallThick = 0.2;
+
+  const hasDoor = (dir: string) => room.connections.some(c => c.dir === dir);
+
+  return (
+    <group position={[rx, 0, rz]}>
+      {/* Floor */}
+      <mesh position={[0, -0.05, 0]} receiveShadow>
+        <boxGeometry args={[room.size[0], 0.1, room.size[2]]} />
+        <meshStandardMaterial color={room.color} roughness={0.7} />
+      </mesh>
+
+      {/* Walls */}
+      {/* North wall (z = -halfD) */}
+      {hasDoor('north') ? (
+        <>
+          <mesh position={[-(halfW + DOOR_W / 2) / 2 - DOOR_W / 4, wallH / 2, -halfD]}>
+            <boxGeometry args={[(halfW - DOOR_W / 2), wallH, wallThick]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+          <mesh position={[(halfW + DOOR_W / 2) / 2 + DOOR_W / 4, wallH / 2, -halfD]}>
+            <boxGeometry args={[(halfW - DOOR_W / 2), wallH, wallThick]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+        </>
+      ) : (
+        <mesh position={[0, wallH / 2, -halfD]}>
+          <boxGeometry args={[room.size[0], wallH, wallThick]} />
+          <meshStandardMaterial color={room.wallColor} />
+        </mesh>
+      )}
+
+      {/* South wall */}
+      {hasDoor('south') ? (
+        <>
+          <mesh position={[-(halfW + DOOR_W / 2) / 2 - DOOR_W / 4, wallH / 2, halfD]}>
+            <boxGeometry args={[(halfW - DOOR_W / 2), wallH, wallThick]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+          <mesh position={[(halfW + DOOR_W / 2) / 2 + DOOR_W / 4, wallH / 2, halfD]}>
+            <boxGeometry args={[(halfW - DOOR_W / 2), wallH, wallThick]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+        </>
+      ) : (
+        <mesh position={[0, wallH / 2, halfD]}>
+          <boxGeometry args={[room.size[0], wallH, wallThick]} />
+          <meshStandardMaterial color={room.wallColor} />
+        </mesh>
+      )}
+
+      {/* East wall */}
+      {hasDoor('east') ? (
+        <>
+          <mesh position={[halfW, wallH / 2, -(halfD + DOOR_W / 2) / 2 - DOOR_W / 4]}>
+            <boxGeometry args={[wallThick, wallH, (halfW - DOOR_W / 2)]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+          <mesh position={[halfW, wallH / 2, (halfD + DOOR_W / 2) / 2 + DOOR_W / 4]}>
+            <boxGeometry args={[wallThick, wallH, (halfW - DOOR_W / 2)]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+        </>
+      ) : (
+        <mesh position={[halfW, wallH / 2, 0]}>
+          <boxGeometry args={[wallThick, wallH, room.size[2]]} />
+          <meshStandardMaterial color={room.wallColor} />
+        </mesh>
+      )}
+
+      {/* West wall */}
+      {hasDoor('west') ? (
+        <>
+          <mesh position={[-halfW, wallH / 2, -(halfD + DOOR_W / 2) / 2 - DOOR_W / 4]}>
+            <boxGeometry args={[wallThick, wallH, (halfW - DOOR_W / 2)]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+          <mesh position={[-halfW, wallH / 2, (halfD + DOOR_W / 2) / 2 + DOOR_W / 4]}>
+            <boxGeometry args={[wallThick, wallH, (halfW - DOOR_W / 2)]} />
+            <meshStandardMaterial color={room.wallColor} />
+          </mesh>
+        </>
+      ) : (
+        <mesh position={[-halfW, wallH / 2, 0]}>
+          <boxGeometry args={[wallThick, wallH, room.size[2]]} />
+          <meshStandardMaterial color={room.wallColor} />
+        </mesh>
+      )}
+
+      {/* Furniture */}
+      {room.furniture.map((f, i) => (
+        <mesh key={i} position={f.pos} castShadow receiveShadow>
+          <boxGeometry args={f.size} />
+          <meshStandardMaterial color={f.color} roughness={0.6} />
+        </mesh>
+      ))}
+
+      {/* Room name floating */}
+      <Html position={[0, wallH + 0.5, 0]} center>
+        <div style={{
+          background: 'rgba(0,0,0,0.6)',
+          color: '#fff',
+          padding: '2px 10px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 'bold',
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+        }}>
+          {room.name}
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+function Hospital3D() {
+  return (
+    <group>
+      {ROOMS.map(r => <Room3D key={r.id} room={r} />)}
+
+      {/* Corridor floors between rooms */}
+      {/* reception → clinic */}
+      <mesh position={[0, -0.05, -5]} receiveShadow>
+        <boxGeometry args={[DOOR_W + 0.5, 0.1, 2]} />
+        <meshStandardMaterial color="#D5D5D5" />
+      </mesh>
+      {/* clinic → injection */}
+      <mesh position={[5, -0.05, -10]} receiveShadow>
+        <boxGeometry args={[2, 0.1, DOOR_W + 0.5]} />
+        <meshStandardMaterial color="#D5D5D5" />
+      </mesh>
+      {/* clinic → surgery */}
+      <mesh position={[0, -0.05, -15]} receiveShadow>
+        <boxGeometry args={[DOOR_W + 0.5, 0.1, 2]} />
+        <meshStandardMaterial color="#D5D5D5" />
+      </mesh>
+      {/* injection → pharmacy */}
+      <mesh position={[10, -0.05, -15]} receiveShadow>
+        <boxGeometry args={[DOOR_W + 0.5, 0.1, 2]} />
+        <meshStandardMaterial color="#D5D5D5" />
+      </mesh>
+      {/* surgery → pharmacy */}
+      <mesh position={[5, -0.05, -20]} receiveShadow>
+        <boxGeometry args={[2, 0.1, DOOR_W + 0.5]} />
+        <meshStandardMaterial color="#D5D5D5" />
+      </mesh>
+      {/* surgery → ward */}
+      <mesh position={[0, -0.05, -25]} receiveShadow>
+        <boxGeometry args={[DOOR_W + 0.5, 0.1, 2]} />
+        <meshStandardMaterial color="#D5D5D5" />
+      </mesh>
+    </group>
+  );
+}
+
+// Ihyunbot 3D character (procedural low-poly robot)
+function Ihyunbot3D() {
+  const meshRef = useRef<THREE.Group>(null!);
+  const bobRef = useRef(0);
+
+  useFrame((_, delta) => {
+    const store = useGameStore.getState();
+    if (!meshRef.current) return;
+    if (store.phase !== 'playing' && store.phase !== 'boss') return;
+
+    const [px, py, pz] = store.playerPos;
+    meshRef.current.position.set(px, py, pz);
+    meshRef.current.rotation.y = store.playerRotation;
+
+    // Bobbing animation when moving
+    const isMoving = keysPressed.size > 0 || joystickActive;
+    if (isMoving) {
+      bobRef.current += delta * 8;
+      meshRef.current.position.y = py + Math.sin(bobRef.current) * 0.06;
+    }
   });
 
-  // React states only for buttons
-  const [scoreDisplay, setScoreDisplay] = useState(0);
+  return (
+    <group ref={meshRef}>
+      {/* Body */}
+      <mesh position={[0, 0.6, 0]} castShadow>
+        <boxGeometry args={[0.6, 0.8, 0.4]} />
+        <meshStandardMaterial color={COLORS.secondary} roughness={0.4} metalness={0.3} />
+      </mesh>
+      {/* Head */}
+      <mesh position={[0, 1.2, 0]} castShadow>
+        <boxGeometry args={[0.5, 0.5, 0.45]} />
+        <meshStandardMaterial color="#E0E0E0" roughness={0.3} metalness={0.5} />
+      </mesh>
+      {/* Eyes */}
+      <mesh position={[-0.12, 1.25, 0.23]}>
+        <sphereGeometry args={[0.06, 8, 8]} />
+        <meshStandardMaterial color="#2196F3" emissive="#2196F3" emissiveIntensity={0.5} />
+      </mesh>
+      <mesh position={[0.12, 1.25, 0.23]}>
+        <sphereGeometry args={[0.06, 8, 8]} />
+        <meshStandardMaterial color="#2196F3" emissive="#2196F3" emissiveIntensity={0.5} />
+      </mesh>
+      {/* Antenna */}
+      <mesh position={[0, 1.55, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 0.2, 6]} />
+        <meshStandardMaterial color="#FF6B6B" />
+      </mesh>
+      <mesh position={[0, 1.7, 0]}>
+        <sphereGeometry args={[0.06, 8, 8]} />
+        <meshStandardMaterial color="#FF6B6B" emissive="#FF6B6B" emissiveIntensity={0.3} />
+      </mesh>
+      {/* Arms */}
+      <mesh position={[-0.45, 0.6, 0]} castShadow>
+        <boxGeometry args={[0.15, 0.5, 0.15]} />
+        <meshStandardMaterial color={COLORS.secondary} roughness={0.4} metalness={0.3} />
+      </mesh>
+      <mesh position={[0.45, 0.6, 0]} castShadow>
+        <boxGeometry args={[0.15, 0.5, 0.15]} />
+        <meshStandardMaterial color={COLORS.secondary} roughness={0.4} metalness={0.3} />
+      </mesh>
+      {/* Legs/wheels */}
+      <mesh position={[-0.15, 0.1, 0]}>
+        <cylinderGeometry args={[0.1, 0.1, 0.15, 8]} />
+        <meshStandardMaterial color="#333" roughness={0.6} />
+      </mesh>
+      <mesh position={[0.15, 0.1, 0]}>
+        <cylinderGeometry args={[0.1, 0.1, 0.15, 8]} />
+        <meshStandardMaterial color="#333" roughness={0.6} />
+      </mesh>
+      {/* Medical cross on body */}
+      <mesh position={[0, 0.7, 0.21]}>
+        <boxGeometry args={[0.25, 0.06, 0.01]} />
+        <meshStandardMaterial color="#FF6B6B" />
+      </mesh>
+      <mesh position={[0, 0.7, 0.21]}>
+        <boxGeometry args={[0.06, 0.25, 0.01]} />
+        <meshStandardMaterial color="#FF6B6B" />
+      </mesh>
+    </group>
+  );
+}
 
-  // ── Animation state ──────────────────────────────────────────────────────────
-  const frameRef      = useRef(0);
-  const rafRef        = useRef(0);
-  const sparklesRef   = useRef<Sparkle[]>([]);
-  const floatsRef     = useRef<FloatingText[]>([]);
-  const patEnterRef   = useRef(0);  // 0=offscreen, 1=settled (lerp)
-  const celebTimerRef = useRef(0);
-  const pulseRef      = useRef(0);  // for hurt zone pulse
-  const shakeRef      = useRef(0);  // shake frames remaining
-  const shakeDirRef   = useRef(1);
-  const treatFlashRef = useRef(0);  // flash frames after successful drop
-  const flashZoneRef  = useRef('');
+// Patient 3D component
+function Patient3D({ patient }: { patient: PatientData }) {
+  const meshRef = useRef<THREE.Group>(null!);
+  const bobRef = useRef(Math.random() * 10);
 
-  // ── Drag state ───────────────────────────────────────────────────────────────
-  const dragRef = useRef<DragState | null>(null);
+  useFrame((_, delta) => {
+    if (!meshRef.current) return;
+    bobRef.current += delta * 2;
 
-  // ── HUD hint text ─────────────────────────────────────────────────────────────
-  const hintRef = useRef('');
-  const hintTimerRef = useRef(0);
+    // Bobbing
+    meshRef.current.position.y = Math.sin(bobRef.current) * 0.05;
 
-  // ── Ending sequence ──────────────────────────────────────────────────────────
-  const endPhaseRef = useRef(0); // 0=parade, 1=stats, 2=buttons
-  const endTimerRef = useRef(0);
-
-  // ── Audio helper ─────────────────────────────────────────────────────────────
-  const audio = useCallback(() => {
-    if (!audioRef.current) audioRef.current = makeAudio();
-    if (audioRef.current?.state === 'suspended') audioRef.current.resume();
-    return audioRef.current;
-  }, []);
-
-  // ── Spawn helpers ────────────────────────────────────────────────────────────
-  const spawnSparkles = useCallback((x: number, y: number, count = 14) => {
-    for (let i = 0; i < count; i++) {
-      const a = (Math.PI * 2 * i) / count + Math.random() * 0.4;
-      const sp = 2 + Math.random() * 5;
-      sparklesRef.current.push({
-        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 2,
-        color: HEART_COLORS[Math.floor(Math.random() * HEART_COLORS.length)],
-        size: 6 + Math.random() * 8, alpha: 1, life: 45 + Math.random() * 20,
-      });
-    }
-  }, []);
-
-  const spawnFloat = useCallback((text: string, x: number, y: number, color: string, size = 26) => {
-    floatsRef.current.push({ text, x, y, vy: -1.8, alpha: 1, color, size });
-  }, []);
-
-  const showHint = useCallback((text: string) => {
-    hintRef.current = text;
-    hintTimerRef.current = 120;
-  }, []);
-
-  // ── Reset patient state ──────────────────────────────────────────────────────
-  const resetPatState = useCallback(() => {
-    patStateRef.current = {
-      zonesDone: new Set(), stethoscopeDone: false,
-      leftEarDone: false, rightEarDone: false, disinfectDone: false,
-    };
-    firstTryRef.current = true;
-    treatFlashRef.current = 0;
-    flashZoneRef.current = '';
-  }, []);
-
-  // ── Start game ────────────────────────────────────────────────────────────────
-  const startGame = useCallback(() => {
-    stageRef.current      = 0;
-    scoreRef.current      = 0;
-    stickersRef.current   = 0;
-    setScoreDisplay(0);
-    phaseRef.current      = 'playing';
-    setPhase('playing');
-    treatPhaseRef.current = 'entering';
-    patEnterRef.current   = 0;
-    sparklesRef.current   = [];
-    floatsRef.current     = [];
-    resetPatState();
-    celebTimerRef.current = 0;
-    hintRef.current       = '새 환자가 옵니다!';
-    hintTimerRef.current  = 90;
-    const ac = audio();
-    if (ac) playDoorbell(ac);
-  }, [audio, resetPatState]);
-
-  // ── Advance treat phase ──────────────────────────────────────────────────────
-  const advanceTreatPhase = useCallback((to: TreatPhase) => {
-    treatPhaseRef.current = to;
-    firstTryRef.current = true;
-  }, []);
-
-  // ── After all zones+medicine done: celebrate ─────────────────────────────────
-  const triggerCelebrate = useCallback(() => {
-    const s = stageRef.current;
-    const stage = STAGES[s];
-    spawnSparkles(
-      (canvasRef.current?.width ?? 400) * 0.35,
-      (canvasRef.current?.height ?? 700) * 0.4, 22,
-    );
-    floatsRef.current = [];
-    spawnFloat(stage.completeLine, (canvasRef.current?.width ?? 400) / 2, 180, '#0F766E', 20);
-    spawnFloat('⭐ 스티커 획득!', (canvasRef.current?.width ?? 400) / 2, 220, COLOR_STICKER, 24);
-    stickersRef.current++;
-    scoreRef.current += 150; // stage complete bonus
-    setScoreDisplay(scoreRef.current);
-    advanceTreatPhase('celebrating');
-    celebTimerRef.current = 150;
-    const ac = audio();
-    if (ac) playFanfare(ac);
-  }, [advanceTreatPhase, audio, spawnFloat, spawnSparkles]);
-
-  // ── Move to next stage or ending ─────────────────────────────────────────────
-  const nextStage = useCallback(() => {
-    const next = stageRef.current + 1;
-    if (next >= TOTAL_STAGES) {
-      // All done!
-      phaseRef.current = 'ending';
-      setPhase('ending');
-      endPhaseRef.current = 0;
-      endTimerRef.current = 0;
-      saveScore('hospital', '의사선생님', scoreRef.current);
-      const ac = audio();
-      if (ac) playCelebration(ac);
+    // Wrong tool shake
+    if (patient.wrongToolTimer > 0) {
+      meshRef.current.position.x = Math.sin(bobRef.current * 20) * 0.05;
     } else {
-      stageRef.current = next;
-      treatPhaseRef.current = 'entering';
-      patEnterRef.current = 0;
-      sparklesRef.current = [];
-      floatsRef.current = [];
-      resetPatState();
-      celebTimerRef.current = 0;
-      hintRef.current = '새 환자가 옵니다!';
-      hintTimerRef.current = 90;
-      const ac = audio();
-      if (ac) playDoorbell(ac);
+      meshRef.current.position.x = 0;
     }
-  }, [audio, resetPatState]);
+  });
 
-  // ── Handle a tool drop on the patient ────────────────────────────────────────
-  const handleDrop = useCallback((toolId: ToolId, dropX: number, dropY: number) => {
-    const W = canvasRef.current?.width  ?? 400;
-    const H = canvasRef.current?.height ?? 700;
-    const tph = treatPhaseRef.current;
-    const s   = stageRef.current;
-    const stage = STAGES[s];
-    const ps  = patStateRef.current;
+  if (patient.state !== 'waiting') return null;
 
-    // Patient position
-    const trayH  = Math.min(120, H * 0.17);
-    const hudH   = Math.min(64, H * 0.09);
-    const playH  = H - trayH - hudH;
-    const patX   = W * 0.32;
-    const patY   = hudH + playH * 0.50;
-    const patR   = Math.min(72, W * 0.17);
+  const symptom = SYMPTOMS[patient.symptom];
 
-    const ac = audio();
+  return (
+    <group position={patient.position}>
+      <group ref={meshRef}>
+        {/* Body */}
+        <mesh position={[0, 0.5, 0]} castShadow>
+          <boxGeometry args={[0.5, 0.7, 0.35]} />
+          <meshStandardMaterial color={patient.color} roughness={0.5} />
+        </mesh>
+        {/* Head */}
+        <mesh position={[0, 1, 0]} castShadow>
+          <sphereGeometry args={[0.25, 8, 8]} />
+          <meshStandardMaterial color="#FFEAA7" roughness={0.5} />
+        </mesh>
 
-    // ── Stethoscope phase: tap stethoscope then tap patient body ──────────────
-    if (tph === 'stethoscope') {
-      if (toolId !== 'stethoscope') {
-        if (ac) playWrong(ac);
-        showHint('먼저 🩺 청진기를 사용해요!');
-        shakeRef.current = 12;
-        firstTryRef.current = false;
-        return;
+        {/* Emergency indicator */}
+        {patient.isEmergency && (
+          <mesh position={[0.35, 1.3, 0]}>
+            <sphereGeometry args={[0.1, 8, 8]} />
+            <meshStandardMaterial color="#FF0000" emissive="#FF0000" emissiveIntensity={1} />
+          </mesh>
+        )}
+
+        {/* Speech bubble (HTML overlay) */}
+        <Html position={[0, 1.8, 0]} center>
+          <div style={{
+            background: 'white',
+            border: '2px solid #DDD',
+            borderRadius: 12,
+            padding: '4px 10px',
+            fontSize: 13,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            minWidth: 60,
+            textAlign: 'center',
+          }}>
+            <span style={{ fontSize: 18 }}>{symptom.emoji}</span>
+            <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{symptom.name}</div>
+            {patient.isEmergency && patient.emergencyTimer > 0 && (
+              <div style={{ fontSize: 10, color: '#FF0000', fontWeight: 'bold' }}>
+                {Math.ceil(patient.emergencyTimer)}초!
+              </div>
+            )}
+          </div>
+        </Html>
+      </group>
+    </group>
+  );
+}
+
+// Boss 3D
+function Boss3D() {
+  const meshRef = useRef<THREE.Group>(null!);
+  const timeRef = useRef(0);
+  const store = useGameStore.getState();
+
+  useFrame((_, delta) => {
+    const state = useGameStore.getState();
+    if (state.phase !== 'boss' || !meshRef.current) return;
+    timeRef.current += delta;
+
+    const surgeryPos = ROOM_MAP['surgery'].position;
+    const bx = surgeryPos[0];
+    const bz = surgeryPos[2];
+
+    // Hover and pulse
+    meshRef.current.position.set(bx, 1 + Math.sin(timeRef.current * 2) * 0.3, bz);
+    const scale = 1 + Math.sin(timeRef.current * 3) * 0.05;
+    meshRef.current.scale.setScalar(scale);
+
+    // Rotate slowly
+    meshRef.current.rotation.y += delta * 0.5;
+  });
+
+  if (store.phase !== 'boss') return null;
+
+  return (
+    <group ref={meshRef}>
+      {/* Virus body */}
+      <mesh castShadow>
+        <dodecahedronGeometry args={[0.8, 0]} />
+        <meshStandardMaterial color="#8E24AA" roughness={0.3} emissive="#AA00FF" emissiveIntensity={0.3} />
+      </mesh>
+      {/* Spikes */}
+      {[0, 1, 2, 3, 4, 5].map(i => {
+        const angle = (Math.PI * 2 * i) / 6;
+        return (
+          <mesh key={i} position={[Math.cos(angle) * 0.9, 0, Math.sin(angle) * 0.9]}
+            rotation={[0, 0, angle]}>
+            <coneGeometry args={[0.15, 0.4, 4]} />
+            <meshStandardMaterial color="#CE93D8" />
+          </mesh>
+        );
+      })}
+      {/* Eyes */}
+      <mesh position={[-0.2, 0.15, 0.7]}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+        <meshStandardMaterial color="#FF0000" emissive="#FF0000" emissiveIntensity={1} />
+      </mesh>
+      <mesh position={[0.2, 0.15, 0.7]}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+        <meshStandardMaterial color="#FF0000" emissive="#FF0000" emissiveIntensity={1} />
+      </mesh>
+
+      <Html position={[0, 1.5, 0]} center>
+        <div style={{
+          background: 'rgba(128,0,128,0.8)',
+          color: '#fff',
+          padding: '4px 12px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 'bold',
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+        }}>
+          🦠 로봇 바이러스
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+// Heal particles
+function HealParticles() {
+  const particlesRef = useRef<THREE.Points>(null!);
+  const positionsRef = useRef(new Float32Array(100 * 3));
+  const velocitiesRef = useRef<{ vx: number; vy: number; vz: number; life: number }[]>([]);
+
+  useFrame((_, delta) => {
+    if (!particlesRef.current) return;
+    const positions = positionsRef.current;
+    const vels = velocitiesRef.current;
+
+    for (let i = vels.length - 1; i >= 0; i--) {
+      const v = vels[i];
+      v.life -= delta;
+      if (v.life <= 0) {
+        vels.splice(i, 1);
+        positions[i * 3] = 0;
+        positions[i * 3 + 1] = -100;
+        positions[i * 3 + 2] = 0;
+        continue;
       }
-      // Check drop on patient
-      const d = dist(dropX, dropY, patX, patY);
-      if (d > patR * 1.3) {
-        if (ac) playWrong(ac);
-        showHint('환자한테 청진기를 대봐요!');
-        return;
-      }
-      // Success
-      if (ac) playSuccess(ac);
-      const pts = firstTryRef.current ? 150 : 75;
-      scoreRef.current += pts;
-      setScoreDisplay(scoreRef.current);
-      spawnFloat(`+${pts}`, patX, patY - patR - 30, '#10B981', 28);
-      spawnFloat('진찰 완료! 🩺', patX, patY - patR - 60, '#0F766E', 22);
-      spawnSparkles(patX, patY - patR * 0.5, 10);
-      ps.stethoscopeDone = true;
-      // Move to treatment phase
-      // Stage 1 has no "zone" for tool — goes straight to medicine
-      if (stage.zones.length === 0 || s === 0) {
-        advanceTreatPhase('medicine');
-        showHint('💊 약을 환자에게 드려요!');
+      positions[i * 3] += v.vx * delta;
+      positions[i * 3 + 1] += v.vy * delta;
+      positions[i * 3 + 2] += v.vz * delta;
+      v.vy += delta * 2; // gravity up for sparkle effect
+    }
+
+    if (particlesRef.current.geometry) {
+      particlesRef.current.geometry.attributes.position.needsUpdate = true;
+    }
+  });
+
+  return (
+    <points ref={particlesRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          args={[positionsRef.current, 3]}
+        />
+      </bufferGeometry>
+      <pointsMaterial size={0.15} color="#55EFC4" transparent opacity={0.8} />
+    </points>
+  );
+}
+
+// Camera controller
+function CameraController() {
+  const { camera } = useThree();
+
+  useFrame(() => {
+    const state = useGameStore.getState();
+    if (state.phase !== 'playing' && state.phase !== 'boss') return;
+
+    const [px, py, pz] = state.playerPos;
+    const targetX = px + CAMERA_OFFSET[0];
+    const targetY = py + CAMERA_OFFSET[1];
+    const targetZ = pz + CAMERA_OFFSET[2];
+
+    camera.position.x += (targetX - camera.position.x) * CAMERA_LERP;
+    camera.position.y += (targetY - camera.position.y) * CAMERA_LERP;
+    camera.position.z += (targetZ - camera.position.z) * CAMERA_LERP;
+
+    camera.lookAt(px, py + 0.5, pz);
+  });
+
+  return null;
+}
+
+// Player movement system
+function PlayerController() {
+  const dashingRef = useRef(false);
+  const dashTimerRef = useRef(0);
+  const dashDirRef = useRef<[number, number]>([0, 1]);
+
+  useFrame((_, delta) => {
+    const state = useGameStore.getState();
+    if (state.phase !== 'playing' && state.phase !== 'boss') return;
+
+    let moveX = 0;
+    let moveZ = 0;
+
+    // Keyboard
+    if (keysPressed.has('w') || keysPressed.has('arrowup'))    moveZ = -1;
+    if (keysPressed.has('s') || keysPressed.has('arrowdown'))  moveZ = 1;
+    if (keysPressed.has('a') || keysPressed.has('arrowleft'))  moveX = -1;
+    if (keysPressed.has('d') || keysPressed.has('arrowright')) moveX = 1;
+
+    // Joystick
+    if (joystickActive) {
+      if (Math.abs(joystickDx) > 0.2) moveX = joystickDx;
+      if (Math.abs(joystickDy) > 0.2) moveZ = joystickDy;
+    }
+
+    // Normalize
+    const mag = Math.sqrt(moveX * moveX + moveZ * moveZ);
+    if (mag > 0) { moveX /= mag; moveZ /= mag; }
+
+    // Dash
+    let speed = PLAYER_SPEED;
+    if (dashingRef.current) {
+      dashTimerRef.current -= delta;
+      if (dashTimerRef.current <= 0) {
+        dashingRef.current = false;
       } else {
-        advanceTreatPhase('treatment');
-        showHint('아픈 곳에 올바른 도구를 드래그해요!');
+        speed = DASH_SPEED;
+        moveX = dashDirRef.current[0];
+        moveZ = dashDirRef.current[1];
       }
-      return;
     }
 
-    // ── Medicine phase: drag pill to patient ──────────────────────────────────
-    if (tph === 'medicine') {
-      if (toolId !== 'pill') {
-        if (ac) playWrong(ac);
-        showHint('💊 약을 환자에게 드려요!');
-        shakeRef.current = 12;
-        firstTryRef.current = false;
-        return;
-      }
-      const d = dist(dropX, dropY, patX, patY);
-      if (d > patR * 1.4) {
-        showHint('환자 위로 약을 드래그해요!');
-        return;
-      }
-      if (ac) playGulp(ac);
-      const pts = firstTryRef.current ? 150 : 75;
-      scoreRef.current += pts;
-      setScoreDisplay(scoreRef.current);
-      spawnFloat(`+${pts}`, patX, patY - patR - 30, '#F59E0B', 28);
-      spawnFloat('꿀꺽~ 💊', patX, patY - patR - 60, '#10B981', 22);
-      spawnSparkles(patX, patY, 12);
-      triggerCelebrate();
-      return;
+    // Dash cooldown
+    if (state.dashCooldown > 0) {
+      state.setDashCooldown(Math.max(0, state.dashCooldown - delta));
     }
 
-    // ── Treatment phase ────────────────────────────────────────────────────────
-    if (tph === 'treatment') {
-      // Find which zone was hit
-      let hitZone: ZoneDef | null = null;
-      for (const zone of stage.zones) {
-        if (ps.zonesDone.has(zone.key)) continue; // already done
-        const zx = patX + Math.cos(zone.angle) * patR * zone.dist;
-        const zy = patY + Math.sin(zone.angle) * patR * zone.dist;
-        const zr = patR * zone.zoneR;
-        if (dist(dropX, dropY, zx, zy) <= zr * 1.5) {
-          hitZone = zone;
+    if (mag > 0 || dashingRef.current) {
+      const [px, py, pz] = state.playerPos;
+      let nx = px + moveX * speed * delta;
+      let nz = pz + moveZ * speed * delta;
+
+      // Room collision: find current room and clamp
+      const currentRoom = ROOM_MAP[state.playerRoom];
+      const [rx, , rz] = currentRoom.position;
+      const halfW = currentRoom.size[0] / 2 - 0.3;
+      const halfD = currentRoom.size[2] / 2 - 0.3;
+
+      // Check door transitions
+      let transitioned = false;
+      for (const conn of currentRoom.connections) {
+        let doorX = rx, doorZ = rz;
+        let checkDir = false;
+        const margin = 0.5;
+
+        switch (conn.dir) {
+          case 'north':
+            doorZ = rz - currentRoom.size[2] / 2;
+            checkDir = nz < doorZ - margin && Math.abs(nx - rx) < DOOR_W / 2;
+            break;
+          case 'south':
+            doorZ = rz + currentRoom.size[2] / 2;
+            checkDir = nz > doorZ + margin && Math.abs(nx - rx) < DOOR_W / 2;
+            break;
+          case 'east':
+            doorX = rx + currentRoom.size[0] / 2;
+            checkDir = nx > doorX + margin && Math.abs(nz - rz) < DOOR_W / 2;
+            break;
+          case 'west':
+            doorX = rx - currentRoom.size[0] / 2;
+            checkDir = nx < doorX - margin && Math.abs(nz - rz) < DOOR_W / 2;
+            break;
+        }
+
+        if (checkDir) {
+          const targetRoom = ROOM_MAP[conn.to];
+          const [trx, , trz] = targetRoom.position;
+          // Spawn at opposite door
+          switch (conn.dir) {
+            case 'north': nx = trx; nz = trz + targetRoom.size[2] / 2 - 1; break;
+            case 'south': nx = trx; nz = trz - targetRoom.size[2] / 2 + 1; break;
+            case 'east':  nx = trx - targetRoom.size[0] / 2 + 1; nz = trz; break;
+            case 'west':  nx = trx + targetRoom.size[0] / 2 - 1; nz = trz; break;
+          }
+          state.setPlayerRoom(conn.to);
+          sfxDoor();
+          transitioned = true;
+
+          // Move escorted patient
+          if (state.escortingId) {
+            const newPatients = state.patients.map(p =>
+              p.id === state.escortingId ? {
+                ...p,
+                roomId: conn.to,
+                position: [nx + 0.8, 0, nz + 0.8] as Vec3,
+              } : p
+            );
+            useGameStore.setState({ patients: newPatients });
+          }
           break;
         }
       }
 
-      if (!hitZone) {
-        // Check if dropped on general patient area (guide user)
-        const d = dist(dropX, dropY, patX, patY);
-        if (d <= patR * 1.3) {
-          if (ac) playWrong(ac);
-          showHint('아픈 부위를 찾아봐요! 반짝이는 곳이에요!');
-          firstTryRef.current = false;
-        }
-        return;
-      }
-
-      // Validate tool for zone
-      const required = hitZone.requiredTool;
-
-      // Stage 4: wrong tool (bandage instead of cast)
-      if (s === 3 && toolId === 'bandage' && required === 'cast') {
-        if (ac) playWrong(ac);
-        showHint('깁스가 필요해요! 🦴 깁스를 사용하세요!');
-        shakeRef.current = 14;
-        firstTryRef.current = false;
-        spawnFloat('깁스가 필요해요!', patX, patY - patR - 40, '#EF4444', 22);
-        return;
-      }
-
-      // Stage 5 order check: plaster before disinfect
-      if (s === 4 && toolId === 'plaster' && !ps.disinfectDone) {
-        if (ac) playWrong(ac);
-        showHint('먼저 소독해야 해요! 🧴 소독약을 먼저 사용하세요!');
-        shakeRef.current = 14;
-        firstTryRef.current = false;
-        spawnFloat('먼저 소독해야 해요!', patX, patY - patR - 40, '#EF4444', 22);
-        return;
-      }
-
-      if (toolId !== required) {
-        if (ac) playWrong(ac);
-        showHint(`다시 해볼까요? ${TOOLS.find(t => t.id === required)?.emoji ?? ''} 를 써봐요!`);
-        shakeRef.current = 12;
-        firstTryRef.current = false;
-        return;
-      }
-
-      // Correct!
-      if (ac) {
-        if (toolId === 'disinfect') playDisinfect(ac);
-        else playSuccess(ac);
-      }
-      const pts = firstTryRef.current ? 150 : 75;
-      scoreRef.current += pts;
-      setScoreDisplay(scoreRef.current);
-      ps.zonesDone.add(hitZone.key);
-      if (s === 4 && toolId === 'disinfect') ps.disinfectDone = true;
-
-      spawnFloat(`+${pts}`, patX, patY - patR - 30, '#10B981', 28);
-      if (toolId === 'disinfect') {
-        spawnFloat('따끔~', patX + patR * 0.3, patY, '#EF4444', 22);
-      } else {
-        spawnFloat('잘했어요! ✨', patX, patY - patR - 60, '#F59E0B', 20);
-      }
-      spawnSparkles(
-        patX + Math.cos(hitZone.angle) * patR * hitZone.dist,
-        patY + Math.sin(hitZone.angle) * patR * hitZone.dist, 10,
-      );
-      treatFlashRef.current = 30;
-      flashZoneRef.current = hitZone.key;
-      firstTryRef.current = false; // reset for next zone
-      setTimeout(() => { firstTryRef.current = true; }, 50);
-
-      // Check if all zones done
-      const allZonesDone = stage.zones.every(z => ps.zonesDone.has(z.key));
-      if (allZonesDone) {
-        advanceTreatPhase('medicine');
-        showHint('💊 약을 환자에게 드려요!');
-      } else {
-        // More zones remain
-        const remaining = stage.zones.filter(z => !ps.zonesDone.has(z.key));
-        const nextZone = remaining[0];
-        const tool = TOOLS.find(t => t.id === nextZone.requiredTool);
-        showHint(`${tool?.emoji ?? ''} ${nextZone.label}에도 처리해요!`);
-      }
-    }
-  }, [advanceTreatPhase, audio, showHint, spawnFloat, spawnSparkles, triggerCelebrate]);
-
-  // ── Touch / Mouse event helpers ───────────────────────────────────────────────
-  const getPos = (e: React.TouchEvent | React.MouseEvent) => {
-    const r = canvasRef.current!.getBoundingClientRect();
-    if ('touches' in e) {
-      const t = e.touches[0] ?? (e as React.TouchEvent).changedTouches[0];
-      return { x: t.clientX - r.left, y: t.clientY - r.top };
-    }
-    return { x: (e as React.MouseEvent).clientX - r.left, y: (e as React.MouseEvent).clientY - r.top };
-  };
-
-  // Get tool slot position
-  const getToolSlot = useCallback((idx: number, W: number, H: number) => {
-    const trayH = Math.min(120, H * 0.17);
-    const trayY = H - trayH;
-    const slotSize = Math.min(66, (W - 20) / TOOL_COUNT - 8);
-    const totalW = TOOL_COUNT * slotSize + (TOOL_COUNT - 1) * 8;
-    const sx = (W - totalW) / 2 + idx * (slotSize + 8);
-    const sy = trayY + (trayH - slotSize) / 2;
-    return { x: sx, y: sy, size: slotSize };
-  }, []);
-
-  const onPointerDown = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    const { x, y } = getPos(e);
-    const W = canvasRef.current?.width ?? 400;
-    const H = canvasRef.current?.height ?? 700;
-
-    const ph = phaseRef.current;
-
-    // Intro: tap to start
-    if (ph === 'intro') {
-      startGame();
-      return;
-    }
-
-    // Ending: buttons
-    if (ph === 'ending') {
-      const btnW = Math.min(220, W * 0.56);
-      const btnH = 54;
-      const cx = W / 2;
-      const by1 = H * 0.82;
-      const by2 = H * 0.82 + btnH + 16;
-      if (x >= cx - btnW / 2 && x <= cx + btnW / 2 && y >= by1 && y <= by1 + btnH) {
-        startGame(); return;
-      }
-      if (x >= cx - btnW / 2 && x <= cx + btnW / 2 && y >= by2 && y <= by2 + btnH) {
-        window.location.href = '/';
-      }
-      return;
-    }
-
-    if (ph !== 'playing') return;
-
-    const tph = treatPhaseRef.current;
-
-    // Talking phase: tap anywhere to progress to stethoscope
-    if (tph === 'talking') {
-      advanceTreatPhase('stethoscope');
-      showHint('🩺 청진기를 환자에게 드래그해요!');
-      return;
-    }
-
-    if (tph === 'entering' || tph === 'celebrating') return;
-
-    // Check tool tray hit
-    for (let i = 0; i < TOOL_COUNT; i++) {
-      const { x: sx, y: sy, size } = getToolSlot(i, W, H);
-      if (x >= sx && x <= sx + size && y >= sy && y <= sy + size) {
-        dragRef.current = { toolId: TOOLS[i].id, x, y, startX: sx + size / 2, startY: sy + size / 2 };
-        return;
-      }
-    }
-  }, [advanceTreatPhase, getToolSlot, showHint, startGame]);
-
-  const onPointerMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    if (!dragRef.current) return;
-    e.preventDefault();
-    const { x, y } = getPos(e);
-    dragRef.current = { ...dragRef.current, x, y };
-  }, []);
-
-  const onPointerUp = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    if (!dragRef.current) return;
-    const { x, y, toolId } = dragRef.current;
-    dragRef.current = null;
-    if (phaseRef.current !== 'playing') return;
-    const tph = treatPhaseRef.current;
-    if (tph === 'stethoscope' || tph === 'treatment' || tph === 'medicine') {
-      handleDrop(toolId, x, y);
-    }
-  }, [handleDrop]);
-
-  // ── Main draw loop ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const resize = () => {
-      canvas.width  = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resize();
-    window.addEventListener('resize', resize);
-
-    const draw = () => {
-      rafRef.current = requestAnimationFrame(draw);
-      frameRef.current++;
-      const f = frameRef.current;
-      const W = canvas.width;
-      const H = canvas.height;
-      const ctx = canvas.getContext('2d')!;
-      ctx.clearRect(0, 0, W, H);
-      pulseRef.current = (Math.sin(f * 0.08) + 1) / 2; // 0–1 pulse
-
-      const ph = phaseRef.current;
-
-      drawBackground(ctx, W, H);
-
-      if (ph === 'intro')   drawIntro(ctx, W, H, f);
-      if (ph === 'playing') drawPlaying(ctx, W, H, f);
-      if (ph === 'ending')  drawEnding(ctx, W, H, f);
-
-      // Particles
-      sparklesRef.current = sparklesRef.current.filter(s => s.alpha > 0.01);
-      for (const s of sparklesRef.current) {
-        ctx.save();
-        ctx.globalAlpha = s.alpha;
-        ctx.fillStyle = s.color;
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, s.size / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        s.x += s.vx; s.y += s.vy; s.vy += 0.13; s.alpha -= 1 / s.life;
-      }
-
-      // Floating texts
-      floatsRef.current = floatsRef.current.filter(f => f.alpha > 0.02);
-      for (const ft of floatsRef.current) {
-        ctx.save();
-        ctx.globalAlpha = ft.alpha;
-        ctx.font = `bold ${ft.size}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3;
-        ctx.strokeText(ft.text, ft.x, ft.y);
-        ctx.fillStyle = ft.color;
-        ctx.fillText(ft.text, ft.x, ft.y);
-        ctx.restore();
-        ft.y += ft.vy;
-        ft.alpha -= 0.016;
-      }
-
-      // Shake decay
-      if (shakeRef.current > 0) shakeRef.current--;
-
-      // Hint timer
-      if (hintTimerRef.current > 0) hintTimerRef.current--;
-
-      // Dragged tool
-      const drag = dragRef.current;
-      if (drag) {
-        const tool = TOOLS.find(t => t.id === drag.toolId)!;
-        ctx.save();
-        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-        ctx.shadowBlur = 12;
-        emoji(ctx, tool.emoji, drag.x, drag.y - 10, 52);
-        ctx.restore();
-      }
-    };
-
-    // ── Background ─────────────────────────────────────────────────────────────
-    function drawBackground(ctx: CanvasRenderingContext2D, W: number, H: number) {
-      // Mint gradient
-      const g = ctx.createLinearGradient(0, 0, 0, H);
-      g.addColorStop(0, COLOR_BG);
-      g.addColorStop(1, '#D4F5E9');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, H);
-
-      // Floor stripe
-      ctx.fillStyle = '#C8F0E0';
-      ctx.fillRect(0, H * 0.74, W, H * 0.26);
-
-      // Wall line
-      ctx.strokeStyle = '#A8E6CE';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(0, H * 0.74);
-      ctx.lineTo(W, H * 0.74);
-      ctx.stroke();
-
-      // Hospital cross decoration top-right
-      const cx2 = W * 0.88, cy2 = H * 0.07;
-      const cs = Math.min(32, W * 0.08);
-      ctx.save();
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = '#FF6B9D';
-      ctx.fillRect(cx2 - cs * 0.12, cy2 - cs * 0.4, cs * 0.24, cs * 0.8);
-      ctx.fillRect(cx2 - cs * 0.4, cy2 - cs * 0.12, cs * 0.8, cs * 0.24);
-      ctx.restore();
-
-      // Window top-left
-      const wx = W * 0.05, wy = H * 0.1, ww = W * 0.16, wh = H * 0.12;
-      ctx.save();
-      ctx.globalAlpha = 0.6;
-      roundRect(ctx, wx, wy, ww, wh, 8);
-      ctx.fillStyle = '#B3EEF8';
-      ctx.fill();
-      ctx.strokeStyle = '#7CDDE8';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.strokeStyle = '#7CDDE8';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh);
-      ctx.moveTo(wx, wy + wh / 2); ctx.lineTo(wx + ww, wy + wh / 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // ── Intro screen ───────────────────────────────────────────────────────────
-    function drawIntro(ctx: CanvasRenderingContext2D, W: number, H: number, f: number) {
-      const cx = W / 2;
-      ctx.textAlign = 'center';
-
-      // Title card
-      const cardW = Math.min(360, W - 32);
-      const cardH = Math.min(480, H * 0.72);
-      const cardX = (W - cardW) / 2;
-      const cardY = (H - cardH) / 2 - H * 0.03;
-      ctx.save();
-      ctx.shadowColor = 'rgba(255,107,157,0.25)';
-      ctx.shadowBlur = 24;
-      roundRect(ctx, cardX, cardY, cardW, cardH, 28);
-      ctx.fillStyle = COLOR_SPEECH_BG;
-      ctx.fill();
-      ctx.restore();
-      roundRect(ctx, cardX, cardY, cardW, cardH, 28);
-      ctx.strokeStyle = '#FFB3D1';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // Doctor emoji bouncing
-      const bounce = Math.sin(f * 0.06) * 6;
-      emoji(ctx, '👩‍⚕️', cx, cardY + cardH * 0.18 + bounce, Math.min(72, cardW * 0.2));
-
-      ctx.fillStyle = '#D63384';
-      ctx.font = `bold ${Math.min(26, cardW * 0.07)}px sans-serif`;
-      ctx.textBaseline = 'middle';
-      ctx.fillText('병원놀이', cx, cardY + cardH * 0.36);
-
-      ctx.fillStyle = '#0F766E';
-      ctx.font = `bold ${Math.min(18, cardW * 0.048)}px sans-serif`;
-      ctx.fillText('누가 수술사', cx, cardY + cardH * 0.46);
-
-      ctx.fillStyle = '#555';
-      ctx.font = `${Math.min(14, cardW * 0.037)}px sans-serif`;
-      ctx.fillText('5명의 귀여운 환자들을 치료해요!', cx, cardY + cardH * 0.56);
-
-      // Patient emoji parade
-      const patients = STAGES.map(st => st.patientEmoji);
-      patients.forEach((pe, i) => {
-        const px2 = cx - (patients.length - 1) * 28 + i * 56;
-        const py2 = cardY + cardH * 0.68 + Math.sin(f * 0.07 + i) * 5;
-        emoji(ctx, pe, px2, py2, 36);
-      });
-
-      // Start button
-      const bw = Math.min(200, cardW * 0.6);
-      const bh = 54;
-      const bx = cx - bw / 2;
-      const by = cardY + cardH * 0.82;
-      const pulse2 = (Math.sin(f * 0.07) + 1) / 2;
-      ctx.save();
-      ctx.shadowColor = '#FF6B9D';
-      ctx.shadowBlur = 8 + pulse2 * 10;
-      roundRect(ctx, bx, by, bw, bh, 16);
-      ctx.fillStyle = '#FF6B9D';
-      ctx.fill();
-      ctx.restore();
-      ctx.font = `bold ${Math.min(20, bw * 0.11)}px sans-serif`;
-      ctx.fillStyle = '#fff';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('시작하기 🏥', cx, by + bh / 2);
-    }
-
-    // ── Playing screen ─────────────────────────────────────────────────────────
-    function drawPlaying(ctx: CanvasRenderingContext2D, W: number, H: number, f: number) {
-      const s     = stageRef.current;
-      const stage = STAGES[s];
-      const tph   = treatPhaseRef.current;
-      const ps    = patStateRef.current;
-
-      const trayH  = Math.min(120, H * 0.17);
-      const hudH   = Math.min(64, H * 0.09);
-      const playH  = H - trayH - hudH;
-      const patX   = W * 0.32;
-      const patY   = hudH + playH * 0.50;
-      const patR   = Math.min(72, W * 0.17);
-      const docX   = W * 0.78;
-      const docY   = hudH + playH * 0.45;
-      const docR   = Math.min(50, W * 0.12);
-
-      // ── HUD ────────────────────────────────────────────────────────────────
-      drawHUD(ctx, W, H, hudH, s, scoreRef.current, stickersRef.current);
-
-      // ── Advancing enter animation ─────────────────────────────────────────
-      if (tph === 'entering') {
-        patEnterRef.current = Math.min(1, patEnterRef.current + 0.04);
-        if (patEnterRef.current >= 1) {
-          treatPhaseRef.current = 'talking';
-          showHint('환자 말풍선을 탭하세요!');
-        }
-      }
-
-      // ── Celebrate timer ───────────────────────────────────────────────────
-      if (tph === 'celebrating') {
-        celebTimerRef.current--;
-        if (celebTimerRef.current <= 0) {
-          nextStage();
-          return;
-        }
-      }
-
-      const enterT = patEnterRef.current;
-      const offX   = (1 - enterT) * (-W * 0.9); // slides from left
-
-      // ── Patient area background ────────────────────────────────────────────
-      const areaX = W * 0.04;
-      const areaY = hudH + playH * 0.08;
-      const areaW = W * 0.58;
-      const areaH = playH * 0.78;
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      roundRect(ctx, areaX, areaY, areaW, areaH, 20);
-      ctx.fillStyle = COLOR_PINK_BG;
-      ctx.fill();
-      ctx.restore();
-
-      // ── Doctor ─────────────────────────────────────────────────────────────
-      drawDoctor(ctx, docX, docY + Math.sin(f * 0.05) * 4, docR, tph);
-
-      // ── Patient (with enter slide) ─────────────────────────────────────────
-      const shk = shakeRef.current > 0 ? Math.sin(f * 1.5) * (shakeRef.current / 14) * 10 : 0;
-      drawPatient(ctx, s, stage, patX + offX + shk, patY, patR, tph, ps, f);
-
-      // ── Speech bubble ──────────────────────────────────────────────────────
-      if (tph !== 'entering') {
-        const bubText = tph === 'celebrating'
-          ? stage.completeLine
-          : (tph === 'talking' ? stage.entryLine : stage.symptom);
-        const bubColor = tph === 'celebrating' ? '#D1FAE5' : '#FFFBEB';
-        const bubBorder = tph === 'celebrating' ? '#10B981' : '#FCD34D';
-        const textCol = tph === 'celebrating' ? '#065F46' : '#92400E';
-        drawSpeechBubble(ctx, patX + offX, patY - patR - 10, bubText, W, bubColor, bubBorder, textCol);
-      }
-
-      // ── Instructions / hint ────────────────────────────────────────────────
-      if (tph !== 'celebrating' && tph !== 'entering' && hintTimerRef.current > 0) {
-        drawInstructionBox(ctx, W, H, hudH, playH, hintRef.current);
-      }
-
-      // ── Tool tray ──────────────────────────────────────────────────────────
-      drawToolTray(ctx, W, H, trayH, tph, s, stage, ps, f);
-
-      // ── Treat flash on zone ────────────────────────────────────────────────
-      if (treatFlashRef.current > 0) {
-        treatFlashRef.current--;
-        const fk = flashZoneRef.current;
-        const zone = stage.zones.find(z => z.key === fk);
-        if (zone) {
-          const zx = patX + offX + Math.cos(zone.angle) * patR * zone.dist;
-          const zy = patY + Math.sin(zone.angle) * patR * zone.dist;
-          ctx.save();
-          ctx.globalAlpha = (treatFlashRef.current / 30) * 0.7;
-          ctx.beginPath();
-          ctx.arc(zx, zy, patR * zone.zoneR, 0, Math.PI * 2);
-          ctx.fillStyle = COLOR_GLOW_OK;
-          ctx.fill();
-          ctx.restore();
-          const tool = TOOLS.find(t => t.id === zone.requiredTool);
-          if (tool) emoji(ctx, tool.emoji, zx, zy, patR * 0.45);
-        }
-      }
-    }
-
-    function drawHUD(ctx: CanvasRenderingContext2D, W: number, H: number, hudH: number, stage: number, score2: number, stickers: number) {
-      // HUD background
-      roundRect(ctx, 0, 0, W, hudH, 0);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.globalAlpha = 0.88;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#FFD6E7';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(0, hudH - 2, W, 2);
-
-      // Stage indicator
-      ctx.font = `bold ${Math.min(13, W * 0.032)}px sans-serif`;
-      ctx.fillStyle = '#D63384';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`Stage ${stage + 1} / ${TOTAL_STAGES}`, 12, hudH / 2);
-
-      // Stickers
-      const stickerStr = '⭐'.repeat(stickers) + '○'.repeat(TOTAL_STAGES - stickers);
-      ctx.font = `${Math.min(18, W * 0.043)}px serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(stickerStr, W / 2, hudH / 2);
-
-      // Score
-      ctx.font = `bold ${Math.min(14, W * 0.034)}px sans-serif`;
-      ctx.fillStyle = '#F59E0B';
-      ctx.textAlign = 'right';
-      ctx.fillText(`${score2}점`, W - 12, hudH / 2);
-
-      void H;
-    }
-
-    function drawDoctor(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, tph: TreatPhase) {
-      // White coat circle
-      ctx.save();
-      ctx.shadowColor = '#FFB3D155';
-      ctx.shadowBlur = 16;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFF0F8';
-      ctx.fill();
-      ctx.strokeStyle = '#FFB3D1';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.restore();
-
-      // Bounce when celebrating
-      const bobY = tph === 'celebrating' ? Math.sin(frameRef.current * 0.15) * 5 : 0;
-      emoji(ctx, '👩‍⚕️', x, y + bobY, r * 1.15);
-
-      // Label
-      ctx.font = `bold ${Math.min(11, r * 0.25)}px sans-serif`;
-      ctx.fillStyle = '#D63384';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('의사 선생님', x, y + r + 14);
-    }
-
-    function drawPatient(
-      ctx: CanvasRenderingContext2D,
-      si: number, stage: Stage,
-      px: number, py: number, pr: number,
-      tph: TreatPhase, ps: PatientState, f: number,
-    ) {
-      const isHappy = tph === 'celebrating';
-      const pulse = pulseRef.current;
-
-      // Body glow
-      ctx.save();
-      ctx.shadowColor = isHappy ? COLOR_GLOW_OK : '#AEE8FF';
-      ctx.shadowBlur = isHappy ? 24 : 14;
-      ctx.beginPath();
-      ctx.arc(px, py, pr, 0, Math.PI * 2);
-      ctx.fillStyle = isHappy ? '#D1FAE5' : getPatientBodyColor(si);
-      ctx.fill();
-      ctx.restore();
-
-      ctx.beginPath();
-      ctx.arc(px, py, pr, 0, Math.PI * 2);
-      ctx.strokeStyle = isHappy ? '#10B981' : '#B0D8F5';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // Draw patient body features
-      drawPatientFeatures(ctx, si, px, py, pr, tph, ps, f);
-
-      // Patient emoji center
-      const faceEmoji = isHappy ? '😊' : getPatientFace(si);
-      emoji(ctx, faceEmoji, px, py, pr * 0.85);
-
-      // Hurt zones (glowing, pulsing) — only if not done
-      for (const zone of stage.zones) {
-        if (ps.zonesDone.has(zone.key)) continue;
-        if (tph !== 'treatment' && tph !== 'talking' && tph !== 'stethoscope') continue;
-
-        const zx = px + Math.cos(zone.angle) * pr * zone.dist;
-        const zy = py + Math.sin(zone.angle) * pr * zone.dist;
-        const zr = pr * zone.zoneR;
-
-        // Pulsing red glow
-        ctx.save();
-        ctx.globalAlpha = 0.3 + pulse * 0.5;
-        ctx.beginPath();
-        ctx.arc(zx, zy, zr * (1 + pulse * 0.25), 0, Math.PI * 2);
-        const grad = ctx.createRadialGradient(zx, zy, 0, zx, zy, zr * 1.2);
-        // Stage 5 (bleeding knee) gets red
-        const hurtColor = si === 4 ? '#FF0000' : COLOR_GLOW_HURT;
-        grad.addColorStop(0, hurtColor + 'CC');
-        grad.addColorStop(1, hurtColor + '00');
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.restore();
-
-        // Hurt emoji
-        emoji(ctx, si === 4 ? '🩸' : '💢', zx, zy, zr * 0.9);
-      }
-
-      // Healed zones: show tool emoji
-      for (const zone of stage.zones) {
-        if (!ps.zonesDone.has(zone.key)) continue;
-        const zx = px + Math.cos(zone.angle) * pr * zone.dist;
-        const zy = py + Math.sin(zone.angle) * pr * zone.dist;
-        const tool = TOOLS.find(t => t.id === zone.requiredTool);
-        if (tool) emoji(ctx, tool.emoji, zx, zy, pr * 0.35);
-      }
-
-      void f;
-    }
-
-    function getPatientBodyColor(si: number) {
-      const colors = ['#F5DEB3', '#F8F0FF', '#E8E8E8', '#C8C8C8', '#FFDAB9'];
-      return colors[si] ?? '#F0F0F0';
-    }
-
-    function getPatientFace(si: number) {
-      const faces = ['🐻', '🐰', '🐱', '🐘', '🧒'];
-      return faces[si] ?? '🐾';
-    }
-
-    function drawPatientFeatures(
-      ctx: CanvasRenderingContext2D, si: number,
-      px: number, py: number, pr: number,
-      tph: TreatPhase, ps: PatientState, f: number,
-    ) {
-      void tph; void ps; void f;
-      // Extra decorative features per patient
-
-      if (si === 1) {
-        // Rabbit: tall ears
-        const earW = pr * 0.22;
-        const earH = pr * 0.72;
-        // Left ear
-        ctx.save();
-        ctx.fillStyle = '#F8F0FF';
-        roundRect(ctx, px - pr * 0.55 - earW / 2, py - pr - earH * 0.5, earW, earH, earW / 2);
-        ctx.fill();
-        ctx.strokeStyle = '#DDD0EE';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        // Inner left ear
-        ctx.fillStyle = '#FFB3CC';
-        roundRect(ctx, px - pr * 0.55 - earW * 0.3, py - pr - earH * 0.45, earW * 0.6, earH * 0.7, earW * 0.3);
-        ctx.fill();
-        // Right ear
-        ctx.fillStyle = '#F8F0FF';
-        roundRect(ctx, px + pr * 0.55 - earW / 2, py - pr - earH * 0.5, earW, earH, earW / 2);
-        ctx.fill();
-        ctx.strokeStyle = '#DDD0EE';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fillStyle = '#FFB3CC';
-        roundRect(ctx, px + pr * 0.55 - earW * 0.3, py - pr - earH * 0.45, earW * 0.6, earH * 0.7, earW * 0.3);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      if (si === 2) {
-        // Cat: triangle ears, tail
-        // Left ear
-        ctx.save();
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.moveTo(px - pr * 0.55, py - pr * 0.7);
-        ctx.lineTo(px - pr * 0.25, py - pr * 1.05);
-        ctx.lineTo(px - pr * 0.05, py - pr * 0.7);
-        ctx.closePath();
-        ctx.fill();
-        // Right ear
-        ctx.beginPath();
-        ctx.moveTo(px + pr * 0.05, py - pr * 0.7);
-        ctx.lineTo(px + pr * 0.25, py - pr * 1.05);
-        ctx.lineTo(px + pr * 0.55, py - pr * 0.7);
-        ctx.closePath();
-        ctx.fill();
-        // Tail (curved, right side)
-        ctx.beginPath();
-        ctx.strokeStyle = '#999';
-        ctx.lineWidth = pr * 0.12;
-        ctx.lineCap = 'round';
-        ctx.moveTo(px + pr * 0.8, py + pr * 0.2);
-        ctx.quadraticCurveTo(px + pr * 1.4, py + pr * 0.6, px + pr * 0.9, py + pr * 0.95);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      if (si === 3) {
-        // Elephant: big ears, trunk
-        ctx.save();
-        // Left ear (big oval)
-        ctx.beginPath();
-        ctx.ellipse(px - pr * 0.95, py, pr * 0.38, pr * 0.55, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#BBBBBB';
-        ctx.fill();
-        ctx.strokeStyle = '#999';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        // Right ear
-        ctx.beginPath();
-        ctx.ellipse(px + pr * 0.95, py, pr * 0.38, pr * 0.55, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        // Trunk (curves down-right)
-        ctx.beginPath();
-        ctx.strokeStyle = '#AAAAAA';
-        ctx.lineWidth = pr * 0.18;
-        ctx.lineCap = 'round';
-        ctx.moveTo(px + pr * 0.1, py + pr * 0.3);
-        ctx.quadraticCurveTo(px + pr * 0.55, py + pr * 0.7, px + pr * 0.4, py + pr * 1.05);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      if (si === 0) {
-        // Bear: small round ears
-        ctx.save();
-        ctx.fillStyle = '#C8936C';
-        ctx.beginPath();
-        ctx.arc(px - pr * 0.65, py - pr * 0.78, pr * 0.22, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(px + pr * 0.65, py - pr * 0.78, pr * 0.22, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      if (si === 4) {
-        // Child: simple body stub + visible knees
-        ctx.save();
-        // Body stub below
-        ctx.fillStyle = '#FFDAB9';
-        roundRect(ctx, px - pr * 0.3, py + pr * 0.7, pr * 0.6, pr * 0.4, 8);
-        ctx.fill();
-        ctx.restore();
-      }
-    }
-
-    function drawSpeechBubble(
-      ctx: CanvasRenderingContext2D,
-      cx: number, bottomY: number, text: string,
-      W: number, bg: string, border: string, textColor: string,
-    ) {
-      const pad = 14;
-      const fontSize = Math.min(14, W * 0.034);
-      ctx.font = `bold ${fontSize}px sans-serif`;
-
-      // Word-wrap simple: truncate if too wide
-      const maxW = Math.min(W * 0.65, 300);
-      let displayText = text;
-      if (ctx.measureText(text).width > maxW - pad * 2) {
-        // Show first line up to max
-        while (ctx.measureText(displayText + '…').width > maxW - pad * 2 && displayText.length > 10) {
-          displayText = displayText.slice(0, -1);
-        }
-        displayText += '…';
-      }
-
-      const tw = Math.min(ctx.measureText(displayText).width, maxW - pad * 2);
-      const bw = tw + pad * 2;
-      const bh = fontSize + pad * 2;
-      const bx = Math.max(8, Math.min(W - bw - 8, cx - bw / 2));
-      const by = bottomY - bh;
-
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.12)';
-      ctx.shadowBlur = 8;
-      roundRect(ctx, bx, by, bw, bh, 14);
-      ctx.fillStyle = bg;
-      ctx.fill();
-      ctx.strokeStyle = border;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
-
-      // Tail
-      const tailX = Math.max(bx + 18, Math.min(bx + bw - 18, cx));
-      ctx.beginPath();
-      ctx.moveTo(tailX - 8, by + bh);
-      ctx.lineTo(tailX, by + bh + 10);
-      ctx.lineTo(tailX + 8, by + bh);
-      ctx.fillStyle = bg;
-      ctx.fill();
-      ctx.strokeStyle = border;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      ctx.font = `bold ${fontSize}px sans-serif`;
-      ctx.fillStyle = textColor;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(displayText, bx + bw / 2, by + bh / 2);
-    }
-
-    function drawInstructionBox(
-      ctx: CanvasRenderingContext2D, W: number, H: number, hudH: number, playH: number, text: string,
-    ) {
-      const bh = Math.min(46, H * 0.065);
-      const bw = W - 24;
-      const bx = 12;
-      const by = hudH + playH * 0.85;
-      roundRect(ctx, bx, by, bw, bh, 12);
-      ctx.fillStyle = '#FFF7ED';
-      ctx.fill();
-      ctx.strokeStyle = '#FDBA74';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.font = `bold ${Math.min(14, W * 0.034)}px sans-serif`;
-      ctx.fillStyle = '#92400E';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, W / 2, by + bh / 2);
-    }
-
-    function drawToolTray(
-      ctx: CanvasRenderingContext2D, W: number, H: number, trayH: number,
-      tph: TreatPhase, si: number, stage: Stage, ps: PatientState, f: number,
-    ) {
-      const trayY = H - trayH;
-      roundRect(ctx, 4, trayY + 4, W - 8, trayH - 8, 18);
-      ctx.fillStyle = COLOR_TRAY;
-      ctx.fill();
-      ctx.strokeStyle = '#FFD6A5';
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-
-      // Label
-      ctx.font = `bold ${Math.min(11, W * 0.027)}px sans-serif`;
-      ctx.fillStyle = '#92400E';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText('🧰 도구함', W / 2, trayY + 10);
-
-      const slotSize = Math.min(66, (W - 20) / TOOL_COUNT - 8);
-      const totalTW = TOOL_COUNT * slotSize + (TOOL_COUNT - 1) * 8;
-      const startTX = (W - totalTW) / 2;
-      const slotY = trayY + trayH - slotSize - 10;
-
-      // Determine which tools are "active" (relevant for current phase)
-      const activeTool = getActiveTools(tph, si, stage, ps);
-
-      TOOLS.forEach((tool, i) => {
-        const { x: sx, y: sy } = { x: startTX + i * (slotSize + 8), y: slotY };
-        const isActive = activeTool.has(tool.id);
-        const isDragging = dragRef.current?.toolId === tool.id;
-        const shk = shakeRef.current > 0 && dragRef.current === null ? Math.sin(f * 1.5) * 3 : 0;
-
-        ctx.save();
-        ctx.globalAlpha = isDragging ? 0.4 : (isActive ? 1 : 0.45);
-        ctx.shadowColor = isActive ? '#FFB3D1' : 'transparent';
-        ctx.shadowBlur = isActive ? 10 + (Math.sin(f * 0.12) + 1) * 5 : 0;
-        roundRect(ctx, sx + shk, sy, slotSize, slotSize, 14);
-        ctx.fillStyle = isActive ? '#FFF0F8' : '#F5F5F5';
-        ctx.fill();
-        ctx.strokeStyle = isActive ? '#FF6B9D' : '#E0E0E0';
-        ctx.lineWidth = isActive ? 2.5 : 1.5;
-        ctx.stroke();
-        ctx.restore();
-
-        if (!isDragging) {
-          emoji(ctx, tool.emoji, sx + shk + slotSize / 2, sy + slotSize * 0.46, slotSize * 0.48);
-        }
-
-        ctx.font = `${Math.min(10, slotSize * 0.16)}px sans-serif`;
-        ctx.fillStyle = isActive ? '#D63384' : '#999';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(tool.name, sx + shk + slotSize / 2, sy + slotSize * 0.82);
-      });
-    }
-
-    function getActiveTools(tph: TreatPhase, si: number, stage: Stage, ps: PatientState): Set<ToolId> {
-      const active = new Set<ToolId>();
-      if (tph === 'stethoscope') { active.add('stethoscope'); return active; }
-      if (tph === 'medicine')   { active.add('pill'); return active; }
-      if (tph === 'treatment') {
-        for (const zone of stage.zones) {
-          if (ps.zonesDone.has(zone.key)) continue;
-          active.add(zone.requiredTool);
-          // Stage 4: only cast allowed (not bandage)
-          if (si === 3) { active.delete('bandage'); }
-          // Stage 5: if disinfect not done, only disinfect; else only plaster
-          if (si === 4) {
-            if (!ps.disinfectDone) { active.clear(); active.add('disinfect'); }
-            else { active.clear(); active.add('plaster'); }
+      if (!transitioned) {
+        // Clamp to room bounds
+        nx = Math.max(rx - halfW, Math.min(rx + halfW, nx));
+        nz = Math.max(rz - halfD, Math.min(rz + halfD, nz));
+
+        // Simple furniture collision
+        for (const f of currentRoom.furniture) {
+          const fPos = f.pos;
+          const fSize = f.size;
+          const fWorldX = rx + fPos[0];
+          const fWorldZ = rz + fPos[2];
+          const fhw = fSize[0] / 2 + 0.3;
+          const fhd = fSize[2] / 2 + 0.3;
+
+          if (nx > fWorldX - fhw && nx < fWorldX + fhw &&
+              nz > fWorldZ - fhd && nz < fWorldZ + fhd) {
+            // Push out
+            const dx = nx - fWorldX;
+            const dz = nz - fWorldZ;
+            if (Math.abs(dx) / fhw > Math.abs(dz) / fhd) {
+              nx = dx > 0 ? fWorldX + fhw : fWorldX - fhw;
+            } else {
+              nz = dz > 0 ? fWorldZ + fhd : fWorldZ - fhd;
+            }
           }
-          break; // only show next needed tool
         }
       }
-      return active;
+
+      // Update rotation to face movement direction
+      const targetRot = Math.atan2(moveX, moveZ);
+      let currentRot = state.playerRotation;
+      let diff = targetRot - currentRot;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      currentRot += diff * 0.15;
+
+      state.setPlayerPos([nx, py, nz]);
+      state.setPlayerRotation(currentRot);
+
+      // Battery drain
+      state.setBattery(state.battery - BATTERY_DRAIN * delta * 60);
     }
 
-    // ── Ending screen ──────────────────────────────────────────────────────────
-    function drawEnding(ctx: CanvasRenderingContext2D, W: number, H: number, f: number) {
-      endTimerRef.current++;
-      const t = endTimerRef.current;
-      const cx = W / 2;
+    // Emergency timers
+    const patients = state.patients;
+    let updated = false;
+    const newPatients = patients.map(p => {
+      if (p.isEmergency && p.state === 'waiting' && p.emergencyTimer > 0) {
+        const nt = p.emergencyTimer - delta;
+        if (nt <= 0) {
+          updated = true;
+          return { ...p, state: 'treated' as PatientState, emergencyTimer: 0 };
+        }
+        return { ...p, emergencyTimer: nt };
+      }
+      if (p.wrongToolTimer > 0) {
+        return { ...p, wrongToolTimer: Math.max(0, p.wrongToolTimer - delta) };
+      }
+      return p;
+    });
+    if (updated) {
+      state.setScore(Math.max(0, state.score - 100));
+      state.setMessage('시간 초과! -100점');
+    }
+    useGameStore.setState({ patients: newPatients });
 
-      // Panel
-      const panW = Math.min(380, W - 24);
-      const panH = Math.min(500, H * 0.78);
-      const panX = (W - panW) / 2;
-      const panY = (H - panH) / 2 - 20;
+    // Boss bullets
+    if (state.phase === 'boss' && state.bossHp > 0) {
+      const surgeryPos = ROOM_MAP['surgery'].position;
+      const bx = surgeryPos[0];
+      const bz = surgeryPos[2];
 
-      ctx.save();
-      ctx.shadowColor = 'rgba(255,107,157,0.3)';
-      ctx.shadowBlur = 28;
-      roundRect(ctx, panX, panY, panW, panH, 28);
-      ctx.fillStyle = '#FFFDF0';
-      ctx.fill();
-      ctx.restore();
-      roundRect(ctx, panX, panY, panW, panH, 28);
-      ctx.strokeStyle = '#FFB3D1';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // Confetti
-      for (let i = 0; i < 8; i++) {
-        const a = f * 0.025 + i;
-        const rx = panX + 20 + (panW - 40) * (i / 7);
-        const ry = panY + 16 + Math.sin(a) * 8;
-        emoji(ctx, ['🎉', '⭐', '🎊', '💊', '🩺', '❤️', '🌟', '🏆'][i], rx, ry, 20);
+      // Shoot periodically
+      const time = performance.now() / 1000;
+      if (Math.sin(time * 1.5) > 0.95) {
+        const newBullets = [...state.bossBullets];
+        for (let a = 0; a < 6; a++) {
+          const angle = (Math.PI * 2 * a) / 6 + time * 0.3;
+          newBullets.push({
+            x: bx, z: bz,
+            vx: Math.cos(angle) * 3,
+            vz: Math.sin(angle) * 3,
+          });
+        }
+        useGameStore.setState({ bossBullets: newBullets });
       }
 
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      // Title
-      ctx.font = `bold ${Math.min(26, panW * 0.07)}px sans-serif`;
-      ctx.fillStyle = '#D63384';
-      ctx.fillText('오늘도 모두 낫게 해줬어요! 🏥', cx, panY + 60);
-
-      // Patient parade
-      const yp = panY + 115;
-      STAGES.forEach((st, i) => {
-        const px2 = panX + 30 + (panW - 60) * (i / (STAGES.length - 1));
-        const bob = Math.sin(f * 0.08 + i * 0.8) * 5;
-        emoji(ctx, st.patientEmoji, px2, yp + bob, 32);
-        emoji(ctx, '👋', px2, yp + bob + 28, 18);
+      // Update bullets
+      const bullets = state.bossBullets.filter(b => {
+        b.x += b.vx * delta;
+        b.z += b.vz * delta;
+        // Bounds check
+        if (Math.abs(b.x - bx) > 5 || Math.abs(b.z - bz) > 5) return false;
+        // Player hit check
+        const [ppx, , ppz] = state.playerPos;
+        if (Math.sqrt((b.x - ppx) ** 2 + (b.z - ppz) ** 2) < 0.4) {
+          state.setBattery(state.battery - 5);
+          return false;
+        }
+        return true;
       });
+      useGameStore.setState({ bossBullets: bullets });
+    }
+  });
 
-      // Message
-      ctx.font = `${Math.min(15, panW * 0.04)}px sans-serif`;
-      ctx.fillStyle = '#555';
-      ctx.fillText(`오늘 ${TOTAL_STAGES}명의 친구들을 모두 낫게 해줬어요!`, cx, panY + 170);
+  // Keyboard events
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const key = e.key.toLowerCase();
+      keysPressed.add(key);
 
-      // Stickers
-      const stickerStr2 = '⭐'.repeat(stickersRef.current);
-      ctx.font = `${Math.min(28, panW * 0.075)}px serif`;
-      ctx.fillText(stickerStr2 + ' 🏆', cx, panY + 215);
-
-      // Score
-      ctx.font = `bold ${Math.min(38, panW * 0.1)}px sans-serif`;
-      ctx.fillStyle = '#F59E0B';
-      ctx.fillText(`${scoreRef.current}점`, cx, panY + 270);
-
-      // Doctor level-up
-      const lvlScale = 1 + Math.sin(f * 0.08) * 0.06;
-      ctx.save();
-      ctx.translate(cx, panY + 330);
-      ctx.scale(lvlScale, lvlScale);
-      emoji(ctx, '👩‍⚕️', 0, 0, 52);
-      ctx.restore();
-
-      // Level-up sparkles
-      if (t % 20 === 0 && t < 200) {
-        spawnSparkles(cx, panY + 320, 8);
+      if (key >= '1' && key <= '4') {
+        useGameStore.getState().setActiveTool(parseInt(key) - 1);
       }
 
-      // Buttons
-      const btnW2 = Math.min(200, panW * 0.58);
-      const bh2 = 52;
-      const bx1 = cx - btnW2 / 2;
-      const by1 = panY + panH - bh2 * 2 - 28;
-      const by2 = by1 + bh2 + 14;
+      if (key === 'shift') {
+        const state = useGameStore.getState();
+        if (state.dashCooldown <= 0 && !dashingRef.current) {
+          dashingRef.current = true;
+          dashTimerRef.current = DASH_DURATION;
+          state.setDashCooldown(DASH_COOLDOWN);
+          const rot = state.playerRotation;
+          dashDirRef.current = [Math.sin(rot), Math.cos(rot)];
+          sfxDash();
+        }
+      }
 
-      ctx.save();
-      ctx.shadowColor = '#FF6B9D';
-      ctx.shadowBlur = 10;
-      roundRect(ctx, bx1, by1, btnW2, bh2, 14);
-      ctx.fillStyle = '#FF6B9D';
-      ctx.fill();
-      ctx.restore();
-      ctx.font = `bold ${Math.min(17, btnW2 * 0.1)}px sans-serif`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText('🔄 다시 시작', cx, by1 + bh2 / 2);
-
-      ctx.save();
-      ctx.shadowColor = '#A0C4FF';
-      ctx.shadowBlur = 10;
-      roundRect(ctx, bx1, by2, btnW2, bh2, 14);
-      ctx.fillStyle = '#74B9FF';
-      ctx.fill();
-      ctx.restore();
-      ctx.font = `bold ${Math.min(17, btnW2 * 0.1)}px sans-serif`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText('🏠 홈으로', cx, by2 + bh2 / 2);
-
-      void t;
+      if (key === ' ' || key === 'enter') {
+        e.preventDefault();
+        useGameStore.getState().interact();
+      }
     }
 
-    draw();
+    function onKeyUp(e: KeyboardEvent) {
+      keysPressed.delete(e.key.toLowerCase());
+    }
 
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
     return () => {
-      cancelAnimationFrame(rafRef.current);
-      window.removeEventListener('resize', resize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
     };
-  }, [nextStage, showHint, spawnSparkles]);
-
-  // ── Cleanup ───────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    return () => { cancelAnimationFrame(rafRef.current); };
   }, []);
 
-  // ── Sync phase ref ────────────────────────────────────────────────────────────
-  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  return null;
+}
+
+// Boss bullets visualization
+function BossBullets3D() {
+  const bulletsRef = useRef<THREE.InstancedMesh>(null!);
+  const tempObj = useMemo(() => new THREE.Object3D(), []);
+
+  useFrame(() => {
+    const state = useGameStore.getState();
+    if (!bulletsRef.current) return;
+
+    const bullets = state.bossBullets;
+    for (let i = 0; i < 50; i++) {
+      if (i < bullets.length) {
+        tempObj.position.set(bullets[i].x, 0.5, bullets[i].z);
+        tempObj.scale.setScalar(1);
+      } else {
+        tempObj.position.set(0, -100, 0);
+        tempObj.scale.setScalar(0);
+      }
+      tempObj.updateMatrix();
+      bulletsRef.current.setMatrixAt(i, tempObj.matrix);
+    }
+    bulletsRef.current.instanceMatrix.needsUpdate = true;
+  });
 
   return (
-    <canvas
-      ref={canvasRef}
+    <instancedMesh ref={bulletsRef} args={[undefined, undefined, 50]}>
+      <sphereGeometry args={[0.15, 6, 6]} />
+      <meshStandardMaterial color="#AA00FF" emissive="#AA00FF" emissiveIntensity={0.8} />
+    </instancedMesh>
+  );
+}
+
+// Lighting setup
+function Lighting() {
+  return (
+    <>
+      <ambientLight intensity={0.6} color="#FFF5EE" />
+      <directionalLight
+        position={[5, 10, 5]}
+        intensity={0.8}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+        shadow-camera-near={0.5}
+        shadow-camera-far={50}
+        shadow-camera-left={-20}
+        shadow-camera-right={20}
+        shadow-camera-top={20}
+        shadow-camera-bottom={-20}
+      />
+      <pointLight position={[0, 4, 0]} intensity={0.3} color="#FFE0B2" />
+    </>
+  );
+}
+
+// Main 3D Scene
+function GameScene() {
+  const phase = useGameStore(s => s.phase);
+  const patients = useGameStore(s => s.patients);
+
+  if (phase === 'menu' || phase === 'dayComplete' || phase === 'gameOver' || phase === 'victory') return null;
+
+  return (
+    <>
+      <Lighting />
+      <CameraController />
+      <PlayerController />
+      <Hospital3D />
+      <Ihyunbot3D />
+      {patients.map(p => <Patient3D key={p.id} patient={p} />)}
+      <Boss3D />
+      <BossBullets3D />
+      <HealParticles />
+      {/* Ground plane */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, -15]} receiveShadow>
+        <planeGeometry args={[60, 60]} />
+        <meshStandardMaterial color="#C8E6C9" roughness={0.9} />
+      </mesh>
+    </>
+  );
+}
+
+// ─── UI Components ────────────────────────────────────────────────────────────
+
+function MainMenu() {
+  const phase = useGameStore(s => s.phase);
+  const startGame = useGameStore(s => s.startGame);
+  const [selectedChar, setSelectedChar] = useState(4);
+
+  const chars = ['승민', '건우', '강우', '수현', '이현', '준영', '준우'];
+  const charColors = ['#FF6B6B', '#74B9FF', '#55EFC4', '#FFEAA7', '#4ECDC4', '#A29BFE', '#FD79A8'];
+
+  if (phase !== 'menu') return null;
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+      color: '#fff', fontFamily: 'sans-serif',
+      zIndex: 10,
+    }}>
+      <div style={{ fontSize: 60, marginBottom: 10 }}>🤖</div>
+      <h1 style={{ fontSize: 26, margin: '0 0 8px', fontWeight: 'bold' }}>이현봇 병원 대모험</h1>
+      <p style={{ fontSize: 14, color: '#74B9FF', margin: '0 0 30px' }}>
+        꼬마 로봇 의사가 되어 환자를 치료하세요!
+      </p>
+
+      <p style={{ fontSize: 13, margin: '0 0 10px', color: '#AAA' }}>조종사를 선택하세요</p>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 24, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 340 }}>
+        {chars.map((name, i) => (
+          <button
+            key={name}
+            onClick={() => { setSelectedChar(i); getAudio(); }}
+            style={{
+              width: 44, height: 52,
+              border: selectedChar === i ? '2px solid #55EFC4' : '2px solid transparent',
+              borderRadius: 10,
+              background: selectedChar === i ? 'rgba(85,239,196,0.2)' : 'rgba(255,255,255,0.08)',
+              color: '#fff', fontSize: 10,
+              cursor: 'pointer',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 2,
+            }}
+          >
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%',
+              background: charColors[i],
+            }} />
+            <span>{name}</span>
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={() => { getAudio(); startGame(chars[selectedChar]); }}
+        style={{
+          padding: '12px 40px',
+          fontSize: 16, fontWeight: 'bold',
+          background: '#55EFC4', color: '#1a1a2e',
+          border: 'none', borderRadius: 12,
+          cursor: 'pointer',
+          boxShadow: '0 4px 15px rgba(85,239,196,0.3)',
+        }}
+      >
+        게임 시작!
+      </button>
+
+      <div style={{
+        marginTop: 24, padding: '12px 20px',
+        background: 'rgba(255,255,255,0.06)',
+        borderRadius: 10, fontSize: 11, color: '#888',
+        lineHeight: 1.8, textAlign: 'center',
+      }}>
+        🎮 WASD/조이스틱: 이동 &nbsp; 🩺 1~4: 도구 선택<br />
+        ⚡ Shift/대쉬: 대쉬 &nbsp; 💚 Space/치료: 상호작용
+      </div>
+    </div>
+  );
+}
+
+function DayCompleteScreen() {
+  const phase = useGameStore(s => s.phase);
+  const currentDay = useGameStore(s => s.currentDay);
+  const score = useGameStore(s => s.score);
+  const message = useGameStore(s => s.message);
+  const nextDay = useGameStore(s => s.nextDay);
+
+  if (phase !== 'dayComplete') return null;
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.8)',
+      color: '#fff', fontFamily: 'sans-serif',
+      zIndex: 10,
+    }}>
+      <div style={{ fontSize: 50, marginBottom: 10 }}>🎉</div>
+      <h2 style={{ fontSize: 24, margin: '0 0 10px' }}>Day {currentDay + 1} 클리어!</h2>
+      <p style={{ fontSize: 14, color: '#55EFC4', margin: '0 0 8px' }}>{message}</p>
+      <p style={{ fontSize: 18, margin: '0 0 20px' }}>총 점수: {score}</p>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+        {DAYS.map((_, i) => (
+          <div key={i} style={{
+            width: 20, height: 20, borderRadius: '50%',
+            background: i <= currentDay ? '#55EFC4' : '#555',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 10, fontWeight: 'bold',
+          }}>
+            {i <= currentDay ? '✓' : ''}
+          </div>
+        ))}
+      </div>
+
+      {currentDay < DAYS.length - 1 && (
+        <button
+          onClick={nextDay}
+          style={{
+            padding: '12px 30px', fontSize: 14, fontWeight: 'bold',
+            background: '#55EFC4', color: '#1a1a2e',
+            border: 'none', borderRadius: 10, cursor: 'pointer',
+          }}
+        >
+          다음 Day →
+        </button>
+      )}
+    </div>
+  );
+}
+
+function VictoryScreen() {
+  const phase = useGameStore(s => s.phase);
+  const score = useGameStore(s => s.score);
+  const playerName = useGameStore(s => s.playerName);
+  const setPhase = useGameStore(s => s.setPhase);
+  const [saved, setSaved] = useState(false);
+
+  if (phase !== 'victory') return null;
+
+  const handleRestart = () => {
+    if (!saved) {
+      saveScore('hospital', playerName || '이현', score);
+      setSaved(true);
+    }
+    setPhase('menu');
+  };
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #0f3460 0%, #533483 100%)',
+      color: '#fff', fontFamily: 'sans-serif',
+      zIndex: 10,
+    }}>
+      <div style={{ fontSize: 60, marginBottom: 10 }}>🏆</div>
+      <h2 style={{ fontSize: 26, margin: '0 0 10px' }}>게임 클리어!</h2>
+      <p style={{ fontSize: 20, color: '#FFD700', margin: '0 0 8px', fontWeight: 'bold' }}>
+        최종 점수: {score}
+      </p>
+      <p style={{ fontSize: 14, color: '#74B9FF', margin: '0 0 8px' }}>
+        이현봇이 모든 환자를 치료했어요!
+      </p>
+      <p style={{ fontSize: 14, color: '#A29BFE', margin: '0 0 24px' }}>
+        로봇 바이러스도 물리쳤어요! 🦠💥
+      </p>
+      <button
+        onClick={handleRestart}
+        style={{
+          padding: '12px 30px', fontSize: 14, fontWeight: 'bold',
+          background: '#55EFC4', color: '#1a1a2e',
+          border: 'none', borderRadius: 10, cursor: 'pointer',
+        }}
+      >
+        다시 시작
+      </button>
+    </div>
+  );
+}
+
+function HUD() {
+  const phase = useGameStore(s => s.phase);
+  const score = useGameStore(s => s.score);
+  const battery = useGameStore(s => s.battery);
+  const currentDay = useGameStore(s => s.currentDay);
+  const activeTool = useGameStore(s => s.activeTool);
+  const patients = useGameStore(s => s.patients);
+  const message = useGameStore(s => s.message);
+  const dashCooldown = useGameStore(s => s.dashCooldown);
+  const playerRoom = useGameStore(s => s.playerRoom);
+  const bossHp = useGameStore(s => s.bossHp);
+  const bossMaxHp = useGameStore(s => s.bossMaxHp);
+
+  const setActiveTool = useGameStore(s => s.setActiveTool);
+  const interact = useGameStore(s => s.interact);
+
+  if (phase !== 'playing' && phase !== 'boss') return null;
+
+  const dayConfig = DAYS[currentDay];
+  const unlockedTools = dayConfig.unlockedTools;
+  const healed = patients.filter(p => p.state === 'treated').length;
+  const total = patients.length;
+  const batPct = battery / BATTERY_MAX;
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      pointerEvents: 'none',
+      fontFamily: 'sans-serif',
+      zIndex: 5,
+    }}>
+      {/* Top bar */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        height: 48, background: 'rgba(0,0,0,0.7)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 12px', color: '#fff',
+      }}>
+        <span style={{ fontSize: 14, fontWeight: 'bold' }}>⭐ {score}</span>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 'bold' }}>Day {currentDay + 1}</div>
+          <div style={{ fontSize: 10, color: '#55EFC4' }}>{healed}/{total} 치료</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 11 }}>🔋</span>
+          <div style={{
+            width: 60, height: 14, background: '#333', borderRadius: 4, overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${batPct * 100}%`, height: '100%',
+              background: batPct > 0.5 ? '#55EFC4' : batPct > 0.2 ? '#FFEAA7' : '#FF6B6B',
+              borderRadius: 4, transition: 'width 0.3s',
+            }} />
+          </div>
+          <span style={{ fontSize: 9 }}>{Math.round(battery)}%</span>
+        </div>
+      </div>
+
+      {/* Boss HP */}
+      {phase === 'boss' && (
+        <div style={{
+          position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(128,0,128,0.8)', padding: '4px 16px',
+          borderRadius: 8, color: '#fff', fontSize: 12,
+        }}>
+          🦠 바이러스 HP: {bossHp}/{bossMaxHp}
+          <div style={{
+            width: 120, height: 8, background: '#333', borderRadius: 4, marginTop: 4,
+          }}>
+            <div style={{
+              width: `${(bossHp / bossMaxHp) * 100}%`, height: '100%',
+              background: '#FF4444', borderRadius: 4,
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Message */}
+      {message && (
+        <div style={{
+          position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.7)', padding: '4px 14px',
+          borderRadius: 8, color: '#FFD700', fontSize: 12,
+          whiteSpace: 'nowrap',
+          ...(phase === 'boss' ? { top: 84 } : {}),
+        }}>
+          {message}
+        </div>
+      )}
+
+      {/* Mini-map */}
+      <div style={{
+        position: 'absolute', top: 52, right: 8,
+        background: 'rgba(0,0,0,0.5)', borderRadius: 6, padding: 4,
+      }}>
+        {ROOMS.map(r => {
+          const isCurrent = r.id === playerRoom;
+          const rPatients = patients.filter(p => p.roomId === r.id && p.state === 'waiting');
+          return (
+            <div key={r.id} style={{
+              position: 'absolute',
+              left: 4 + r.position[0] * 3,
+              top: 4 + (r.position[2] + 30) * 3,
+              width: 22, height: 18,
+              background: isCurrent ? r.wallColor : 'rgba(255,255,255,0.15)',
+              borderRadius: 3,
+              border: isCurrent ? '1.5px solid #fff' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 8, color: rPatients.some(p => p.isEmergency) ? '#FF4444' : '#FFD700',
+              fontWeight: 'bold',
+            }}>
+              {rPatients.length > 0 ? rPatients.length : ''}
+            </div>
+          );
+        })}
+        <div style={{ width: 38, height: 100 }} /> {/* spacer */}
+      </div>
+
+      {/* Tool bar (bottom) */}
+      <div style={{
+        position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', gap: 6,
+        background: 'rgba(0,0,0,0.6)', borderRadius: 12, padding: '6px 10px',
+        pointerEvents: 'auto',
+      }}>
+        {unlockedTools.map((toolId, i) => {
+          const tool = TOOLS.find(t => t.id === toolId)!;
+          const selected = i === activeTool;
+          return (
+            <button
+              key={toolId}
+              onClick={() => setActiveTool(i)}
+              style={{
+                width: 48, height: 48,
+                border: selected ? '2px solid #55EFC4' : '2px solid transparent',
+                borderRadius: 10,
+                background: selected ? 'rgba(85,239,196,0.3)' : 'rgba(255,255,255,0.1)',
+                cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: 1, color: '#fff',
+              }}
+            >
+              <span style={{ fontSize: 20 }}>{tool.emoji}</span>
+              <span style={{ fontSize: 8 }}>{i + 1}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Mobile controls */}
+      <MobileJoystick />
+
+      {/* Action buttons (right side) */}
+      <div style={{
+        position: 'absolute', bottom: 80, right: 16,
+        display: 'flex', flexDirection: 'column', gap: 10,
+        pointerEvents: 'auto',
+      }}>
+        <button
+          onClick={() => interact()}
+          style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: 'rgba(85,239,196,0.6)',
+            border: '2px solid #55EFC4',
+            color: '#fff', fontSize: 12, fontWeight: 'bold',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          치료
+        </button>
+        <button
+          onClick={() => {
+            const state = useGameStore.getState();
+            if (state.dashCooldown <= 0) {
+              state.setDashCooldown(DASH_COOLDOWN);
+              sfxDash();
+            }
+          }}
+          style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: dashCooldown <= 0 ? 'rgba(116,185,255,0.6)' : 'rgba(100,100,100,0.3)',
+            border: dashCooldown <= 0 ? '2px solid #74B9FF' : '2px solid #555',
+            color: '#fff', fontSize: 11,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          대쉬
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MobileJoystick() {
+  const joystickAreaRef = useRef<HTMLDivElement>(null);
+  const [knobPos, setKnobPos] = useState({ x: 0, y: 0 });
+  const touchIdRef = useRef<number | null>(null);
+  const centerRef = useRef({ x: 0, y: 0 });
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    touchIdRef.current = touch.identifier;
+    centerRef.current = { x: touch.clientX, y: touch.clientY };
+    joystickActive = true;
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier === touchIdRef.current) {
+        let dx = t.clientX - centerRef.current.x;
+        let dy = t.clientY - centerRef.current.y;
+        const mag = Math.sqrt(dx * dx + dy * dy);
+        const maxR = 35;
+        if (mag > maxR) { dx = (dx / mag) * maxR; dy = (dy / mag) * maxR; }
+        setKnobPos({ x: dx, y: dy });
+        joystickDx = dx / maxR;
+        joystickDy = dy / maxR;
+      }
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === touchIdRef.current) {
+        touchIdRef.current = null;
+        setKnobPos({ x: 0, y: 0 });
+        joystickDx = 0;
+        joystickDy = 0;
+        joystickActive = false;
+      }
+    }
+  }, []);
+
+  return (
+    <div
+      ref={joystickAreaRef}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       style={{
-        display: 'block',
-        width: '100vw',
-        height: '100dvh',
+        position: 'absolute',
+        bottom: 80, left: 24,
+        width: 100, height: 100,
+        borderRadius: '50%',
+        background: 'rgba(255,255,255,0.1)',
+        border: '2px solid rgba(255,255,255,0.2)',
+        pointerEvents: 'auto',
         touchAction: 'none',
-        userSelect: 'none',
-        cursor: dragRef.current ? 'grabbing' : 'default',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}
-      onMouseDown={onPointerDown}
-      onTouchStart={onPointerDown}
-      onMouseMove={onPointerMove}
-      onTouchMove={onPointerMove}
-      onMouseUp={onPointerUp}
-      onTouchEnd={onPointerUp}
-    />
+    >
+      <div style={{
+        width: 40, height: 40, borderRadius: '50%',
+        background: 'rgba(255,255,255,0.3)',
+        transform: `translate(${knobPos.x}px, ${knobPos.y}px)`,
+        transition: knobPos.x === 0 && knobPos.y === 0 ? 'transform 0.15s' : 'none',
+      }} />
+    </div>
+  );
+}
+
+// ─── Main Page Component ──────────────────────────────────────────────────────
+export default function HospitalPage() {
+  return (
+    <div style={{
+      width: '100vw', height: '100vh',
+      position: 'relative', overflow: 'hidden',
+      touchAction: 'none', userSelect: 'none',
+      background: '#1a1a2e',
+    }}>
+      <Canvas
+        shadows
+        camera={{
+          position: [0, 8, 8],
+          fov: 50,
+          near: 0.1,
+          far: 100,
+        }}
+        style={{ position: 'absolute', inset: 0 }}
+      >
+        <Suspense fallback={null}>
+          <GameScene />
+        </Suspense>
+      </Canvas>
+
+      <MainMenu />
+      <DayCompleteScreen />
+      <VictoryScreen />
+      <HUD />
+    </div>
   );
 }
