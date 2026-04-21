@@ -491,12 +491,17 @@ function randomFrom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.
 
 function generatePatients(dayConfig: DayConfig): PatientData[] {
   const patients: PatientData[] = [];
-  const roomIds: RoomId[] = ['reception', 'clinic', 'injection', 'surgery', 'pharmacy', 'ward'];
+  // Day 1-2: patients in first few rooms only so tutorial is manageable
+  const roomPool: RoomId[] = dayConfig.day <= 1
+    ? ['reception']
+    : dayConfig.day <= 2
+      ? ['reception', 'clinic']
+      : ['reception', 'clinic', 'injection', 'surgery', 'pharmacy', 'ward'];
   let emergencyPlaced = false;
 
   for (let i = 0; i < dayConfig.patientCount; i++) {
     const symptom = randomFrom(dayConfig.availableSymptoms);
-    const room = roomIds[i % roomIds.length];
+    const room = roomPool[i % roomPool.length];
     const roomDef = ROOM_MAP[room];
     const sp = roomDef.spawnPoints[i % roomDef.spawnPoints.length];
     const isEmergency = dayConfig.day >= 3 && !emergencyPlaced && i === dayConfig.patientCount - 1;
@@ -974,10 +979,22 @@ function Ihyunbot3D() {
 function Patient3D({ patient }: { patient: PatientData }) {
   const meshRef = useRef<THREE.Group>(null!);
   const bobRef = useRef(Math.random() * 10);
+  const healTimerRef = useRef(0);
+  const [visible, setVisible] = useState(true);
 
   useFrame((_, delta) => {
     if (!meshRef.current) return;
     bobRef.current += delta * 2;
+
+    if (patient.state === 'treated') {
+      // Heal celebration: float up and fade
+      healTimerRef.current += delta;
+      meshRef.current.position.y = healTimerRef.current * 1.5;
+      const scale = Math.max(0, 1 - healTimerRef.current * 0.8);
+      meshRef.current.scale.setScalar(scale);
+      if (healTimerRef.current > 1.2) setVisible(false);
+      return;
+    }
 
     // Bobbing
     meshRef.current.position.y = Math.sin(bobRef.current) * 0.05;
@@ -990,7 +1007,7 @@ function Patient3D({ patient }: { patient: PatientData }) {
     }
   });
 
-  if (patient.state !== 'waiting') return null;
+  if (!visible || patient.state === 'discharged') return null;
 
   const symptom = SYMPTOMS[patient.symptom];
 
@@ -1000,7 +1017,7 @@ function Patient3D({ patient }: { patient: PatientData }) {
         {/* Body */}
         <mesh position={[0, 0.5, 0]} castShadow>
           <boxGeometry args={[0.5, 0.7, 0.35]} />
-          <meshStandardMaterial color={patient.color} roughness={0.5} />
+          <meshStandardMaterial color={patient.state === 'treated' ? '#95E1D3' : patient.color} roughness={0.5} />
         </mesh>
         {/* Head */}
         <mesh position={[0, 1, 0]} castShadow>
@@ -1009,18 +1026,18 @@ function Patient3D({ patient }: { patient: PatientData }) {
         </mesh>
 
         {/* Emergency indicator */}
-        {patient.isEmergency && (
+        {patient.isEmergency && patient.state === 'waiting' && (
           <mesh position={[0.35, 1.3, 0]}>
             <sphereGeometry args={[0.1, 8, 8]} />
             <meshStandardMaterial color="#FF0000" emissive="#FF0000" emissiveIntensity={1} />
           </mesh>
         )}
 
-        {/* Speech bubble (HTML overlay) */}
+        {/* Speech bubble */}
         <Html position={[0, 1.8, 0]} center>
           <div style={{
-            background: 'white',
-            border: '2px solid #DDD',
+            background: patient.state === 'treated' ? '#95E1D3' : 'white',
+            border: `2px solid ${patient.state === 'treated' ? '#55EFC4' : '#DDD'}`,
             borderRadius: 12,
             padding: '4px 10px',
             fontSize: 13,
@@ -1030,12 +1047,21 @@ function Patient3D({ patient }: { patient: PatientData }) {
             minWidth: 60,
             textAlign: 'center',
           }}>
-            <span style={{ fontSize: 18 }}>{symptom.emoji}</span>
-            <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{symptom.name}</div>
-            {patient.isEmergency && patient.emergencyTimer > 0 && (
-              <div style={{ fontSize: 10, color: '#FF0000', fontWeight: 'bold' }}>
-                {Math.ceil(patient.emergencyTimer)}초!
-              </div>
+            {patient.state === 'treated' ? (
+              <>
+                <span style={{ fontSize: 18 }}>✨</span>
+                <div style={{ fontSize: 10, color: '#2d6a4f', marginTop: 2, fontWeight: 'bold' }}>치료 완료!</div>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 18 }}>{symptom.emoji}</span>
+                <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{symptom.name}</div>
+                {patient.isEmergency && patient.emergencyTimer > 0 && (
+                  <div style={{ fontSize: 10, color: '#FF0000', fontWeight: 'bold' }}>
+                    {Math.ceil(patient.emergencyTimer)}초!
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Html>
