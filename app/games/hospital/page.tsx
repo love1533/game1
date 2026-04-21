@@ -74,7 +74,7 @@ const PLAYER_SPEED = 4;
 const DASH_SPEED = 7;
 const DASH_DURATION = 0.3;
 const DASH_COOLDOWN = 1.5;
-const INTERACT_RANGE = 1.8;
+const INTERACT_RANGE = 2.5;
 const BATTERY_MAX = 100;
 const BATTERY_DRAIN = 0.15;
 const BATTERY_HEAL_BONUS = 15;
@@ -111,7 +111,7 @@ const PATIENT_NAMES = ['민수', '서연', '준호', '지은', '하늘', '곰돌
 
 const ROOM_SIZE = 8;
 const WALL_H = 3;
-const DOOR_W = 1.8;
+const DOOR_W = 2.4;
 
 // Room layout (world positions):
 //        [reception (0,0,0)]
@@ -1248,24 +1248,26 @@ function PlayerController() {
       for (const conn of currentRoom.connections) {
         let doorX = rx, doorZ = rz;
         let checkDir = false;
-        const margin = 0.5;
+        // Threshold: trigger when player is within 0.3 units inside the wall edge
+        // (room clamp is at wall - 0.3, so player can just barely cross this)
+        const threshold = 0.3;
 
         switch (conn.dir) {
           case 'north':
             doorZ = rz - currentRoom.size[2] / 2;
-            checkDir = nz < doorZ - margin && Math.abs(nx - rx) < DOOR_W / 2;
+            checkDir = nz < doorZ + threshold && Math.abs(nx - rx) < DOOR_W / 2;
             break;
           case 'south':
             doorZ = rz + currentRoom.size[2] / 2;
-            checkDir = nz > doorZ + margin && Math.abs(nx - rx) < DOOR_W / 2;
+            checkDir = nz > doorZ - threshold && Math.abs(nx - rx) < DOOR_W / 2;
             break;
           case 'east':
             doorX = rx + currentRoom.size[0] / 2;
-            checkDir = nx > doorX + margin && Math.abs(nz - rz) < DOOR_W / 2;
+            checkDir = nx > doorX - threshold && Math.abs(nz - rz) < DOOR_W / 2;
             break;
           case 'west':
             doorX = rx - currentRoom.size[0] / 2;
-            checkDir = nx < doorX - margin && Math.abs(nz - rz) < DOOR_W / 2;
+            checkDir = nx < doorX + threshold && Math.abs(nz - rz) < DOOR_W / 2;
             break;
         }
 
