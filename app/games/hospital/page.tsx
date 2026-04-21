@@ -127,7 +127,7 @@ const ROOMS: RoomDef[] = [
     id: 'reception', name: '접수/대기실',
     color: '#E8F5E9', wallColor: '#81C784',
     position: [0, 0, 0], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
-    connections: [{ dir: 'south', to: 'clinic' }],
+    connections: [{ dir: 'north', to: 'clinic' }],
     furniture: [
       { type: 'desk', pos: [2.5, 0.4, -2], size: [1.5, 0.8, 0.8], color: '#8D6E63' },
       { type: 'chair', pos: [-2, 0.3, -1], size: [0.6, 0.6, 0.6], color: '#42A5F5' },
@@ -142,9 +142,9 @@ const ROOMS: RoomDef[] = [
     color: '#E3F2FD', wallColor: '#64B5F6',
     position: [0, 0, -10], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
     connections: [
-      { dir: 'north', to: 'reception' },
+      { dir: 'south', to: 'reception' },
       { dir: 'east', to: 'injection' },
-      { dir: 'south', to: 'surgery' },
+      { dir: 'north', to: 'surgery' },
     ],
     furniture: [
       { type: 'bed', pos: [1.5, 0.35, -1], size: [1.8, 0.7, 0.9], color: '#E3F2FD' },
@@ -159,7 +159,7 @@ const ROOMS: RoomDef[] = [
     position: [10, 0, -10], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
     connections: [
       { dir: 'west', to: 'clinic' },
-      { dir: 'south', to: 'pharmacy' },
+      { dir: 'north', to: 'pharmacy' },
     ],
     furniture: [
       { type: 'bed', pos: [0, 0.35, -1], size: [1.8, 0.7, 0.9], color: '#FFF3E0' },
@@ -173,9 +173,9 @@ const ROOMS: RoomDef[] = [
     color: '#FCE4EC', wallColor: '#F06292',
     position: [0, 0, -20], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
     connections: [
-      { dir: 'north', to: 'clinic' },
+      { dir: 'south', to: 'clinic' },
       { dir: 'east', to: 'pharmacy' },
-      { dir: 'south', to: 'ward' },
+      { dir: 'north', to: 'ward' },
     ],
     furniture: [
       { type: 'bed', pos: [0, 0.35, 0], size: [2, 0.7, 1], color: '#F8BBD0' },
@@ -189,7 +189,7 @@ const ROOMS: RoomDef[] = [
     color: '#F3E5F5', wallColor: '#BA68C8',
     position: [10, 0, -20], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
     connections: [
-      { dir: 'north', to: 'injection' },
+      { dir: 'south', to: 'injection' },
       { dir: 'west', to: 'surgery' },
     ],
     furniture: [
@@ -203,7 +203,7 @@ const ROOMS: RoomDef[] = [
     id: 'ward', name: '입원실',
     color: '#FFFDE7', wallColor: '#FFF176',
     position: [0, 0, -30], size: [ROOM_SIZE, WALL_H, ROOM_SIZE],
-    connections: [{ dir: 'north', to: 'surgery' }],
+    connections: [{ dir: 'south', to: 'surgery' }],
     furniture: [
       { type: 'bed', pos: [-2.5, 0.35, -2], size: [1.6, 0.7, 0.9], color: '#FFF9C4' },
       { type: 'bed', pos: [2.5, 0.35, -2], size: [1.6, 0.7, 0.9], color: '#FFF9C4' },
@@ -303,6 +303,152 @@ function sfxVictory() {
   const now = ctx.currentTime;
   [523, 659, 784, 880, 1047, 1319].forEach((f, i) =>
     tone(ctx, f, now + i * 0.12, 0.3, 0.12, 'triangle'));
+}
+
+function sfxClick() {
+  const ctx = getAudio(); if (!ctx) return;
+  const now = ctx.currentTime;
+  tone(ctx, 880, now, 0.05, 0.06, 'sine');
+  tone(ctx, 1100, now + 0.03, 0.06, 0.04, 'sine');
+}
+
+function sfxFootstep() {
+  const ctx = getAudio(); if (!ctx) return;
+  const now = ctx.currentTime;
+  const freq = 100 + Math.random() * 60;
+  const noise = ctx.createBufferSource();
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.15;
+  noise.buffer = buf;
+  const bpf = ctx.createBiquadFilter();
+  bpf.type = 'bandpass'; bpf.frequency.value = freq; bpf.Q.value = 1.5;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.04, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+  noise.connect(bpf).connect(g).connect(ctx.destination);
+  noise.start(now); noise.stop(now + 0.07);
+}
+
+function sfxEmergency() {
+  const ctx = getAudio(); if (!ctx) return;
+  const now = ctx.currentTime;
+  for (let i = 0; i < 3; i++) {
+    tone(ctx, 880, now + i * 0.18, 0.08, 0.08, 'square');
+    tone(ctx, 660, now + i * 0.18 + 0.08, 0.08, 0.06, 'square');
+  }
+}
+
+function sfxGameOver() {
+  const ctx = getAudio(); if (!ctx) return;
+  const now = ctx.currentTime;
+  [440, 370, 311, 261].forEach((f, i) =>
+    tone(ctx, f, now + i * 0.15, 0.3, 0.1, 'triangle'));
+}
+
+function sfxToolSelect() {
+  const ctx = getAudio(); if (!ctx) return;
+  const now = ctx.currentTime;
+  tone(ctx, 660, now, 0.06, 0.05, 'sine');
+  tone(ctx, 990, now + 0.04, 0.08, 0.04, 'sine');
+}
+
+// ─── BGM System ──────────────────────────────────────────────────────────────
+let bgmNodes: { oscs: OscillatorNode[]; gains: GainNode[]; master: GainNode; interval: ReturnType<typeof setInterval> } | null = null;
+
+function bgmStart() {
+  if (bgmNodes) return;
+  const ctx = getAudio(); if (!ctx) return;
+
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0, ctx.currentTime);
+  master.gain.linearRampToValueAtTime(0.035, ctx.currentTime + 1);
+  master.connect(ctx.destination);
+
+  // Melody notes (C major pentatonic, cheerful hospital feel)
+  const melodyNotes = [
+    523, 587, 659, 784, 880, 784, 659, 587,
+    523, 659, 784, 880, 1047, 880, 784, 659,
+    523, 587, 659, 523, 784, 659, 587, 523,
+    392, 440, 523, 587, 659, 587, 523, 440,
+  ];
+  const bassNotes = [
+    262, 262, 330, 330, 349, 349, 262, 262,
+    262, 262, 330, 330, 392, 392, 330, 330,
+    262, 262, 349, 349, 392, 392, 262, 262,
+    196, 196, 262, 262, 330, 330, 262, 262,
+  ];
+
+  let noteIdx = 0;
+  const oscs: OscillatorNode[] = [];
+  const gains: GainNode[] = [];
+
+  // Pad chord (sustained background)
+  const padFreqs = [262, 330, 392]; // C major chord
+  padFreqs.forEach(f => {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    g.gain.value = 0.012;
+    osc.connect(g).connect(master);
+    osc.start();
+    oscs.push(osc);
+    gains.push(g);
+  });
+
+  // Melody voice
+  const melodyOsc = ctx.createOscillator();
+  const melodyGain = ctx.createGain();
+  melodyOsc.type = 'triangle';
+  melodyOsc.frequency.value = melodyNotes[0];
+  melodyGain.gain.value = 0.025;
+  melodyOsc.connect(melodyGain).connect(master);
+  melodyOsc.start();
+  oscs.push(melodyOsc);
+  gains.push(melodyGain);
+
+  // Bass voice
+  const bassOsc = ctx.createOscillator();
+  const bassGain = ctx.createGain();
+  bassOsc.type = 'sine';
+  bassOsc.frequency.value = bassNotes[0];
+  bassGain.gain.value = 0.02;
+  bassOsc.connect(bassGain).connect(master);
+  bassOsc.start();
+  oscs.push(bassOsc);
+  gains.push(bassGain);
+
+  // Step through notes
+  const interval = setInterval(() => {
+    noteIdx = (noteIdx + 1) % melodyNotes.length;
+    const t = ctx.currentTime;
+    melodyOsc.frequency.setValueAtTime(melodyNotes[noteIdx], t);
+    melodyOsc.frequency.linearRampToValueAtTime(melodyNotes[noteIdx], t + 0.02);
+    melodyGain.gain.setValueAtTime(0.03, t);
+    melodyGain.gain.linearRampToValueAtTime(0.015, t + 0.2);
+
+    bassOsc.frequency.setValueAtTime(bassNotes[noteIdx], t);
+    bassGain.gain.setValueAtTime(0.025, t);
+    bassGain.gain.linearRampToValueAtTime(0.012, t + 0.25);
+  }, 280);
+
+  bgmNodes = { oscs, gains, master, interval };
+}
+
+function bgmStop() {
+  if (!bgmNodes) return;
+  const ctx = getAudio();
+  if (ctx) {
+    const t = ctx.currentTime;
+    bgmNodes.master.gain.linearRampToValueAtTime(0, t + 0.5);
+  }
+  clearInterval(bgmNodes.interval);
+  const nodes = bgmNodes;
+  bgmNodes = null;
+  setTimeout(() => {
+    nodes.oscs.forEach(o => { try { o.stop(); } catch {} });
+  }, 600);
 }
 
 // ─── Zustand Store ────────────────────────────────────────────────────────────
@@ -1043,6 +1189,7 @@ function PlayerController() {
   const dashingRef = useRef(false);
   const dashTimerRef = useRef(0);
   const dashDirRef = useRef<[number, number]>([0, 1]);
+  const footstepTimerRef = useRef(0);
 
   useFrame((_, delta) => {
     const state = useGameStore.getState();
@@ -1179,6 +1326,13 @@ function PlayerController() {
         }
       }
 
+      // Footstep sounds
+      footstepTimerRef.current -= delta;
+      if (footstepTimerRef.current <= 0) {
+        sfxFootstep();
+        footstepTimerRef.current = dashingRef.current ? 0.15 : 0.3;
+      }
+
       // Update rotation to face movement direction
       const targetRot = Math.atan2(moveX, moveZ);
       let currentRot = state.playerRotation;
@@ -1202,7 +1356,12 @@ function PlayerController() {
         const nt = p.emergencyTimer - delta;
         if (nt <= 0) {
           updated = true;
+          sfxEmergency();
           return { ...p, state: 'treated' as PatientState, emergencyTimer: 0 };
+        }
+        // Beep when timer hits 10, 5
+        if (Math.floor(nt) !== Math.floor(nt + delta) && (Math.floor(nt + delta) === 10 || Math.floor(nt + delta) === 5)) {
+          sfxEmergency();
         }
         return { ...p, emergencyTimer: nt };
       }
@@ -1412,7 +1571,7 @@ function MainMenu() {
         {chars.map((name, i) => (
           <button
             key={name}
-            onClick={() => { setSelectedChar(i); getAudio(); }}
+            onClick={() => { setSelectedChar(i); getAudio(); sfxClick(); }}
             style={{
               width: 44, height: 52,
               border: selectedChar === i ? '2px solid #55EFC4' : '2px solid transparent',
@@ -1434,7 +1593,7 @@ function MainMenu() {
       </div>
 
       <button
-        onClick={() => { getAudio(); startGame(chars[selectedChar]); }}
+        onClick={() => { getAudio(); sfxClick(); bgmStart(); startGame(chars[selectedChar]); }}
         style={{
           padding: '12px 40px',
           fontSize: 16, fontWeight: 'bold',
@@ -1497,7 +1656,7 @@ function DayCompleteScreen() {
 
       {currentDay < DAYS.length - 1 && (
         <button
-          onClick={nextDay}
+          onClick={() => { sfxClick(); nextDay(); }}
           style={{
             padding: '12px 30px', fontSize: 14, fontWeight: 'bold',
             background: '#55EFC4', color: '#1a1a2e',
@@ -1525,6 +1684,8 @@ function VictoryScreen() {
       saveScore('hospital', playerName || '이현', score);
       setSaved(true);
     }
+    bgmStop();
+    sfxClick();
     setPhase('menu');
   };
 
@@ -1692,7 +1853,7 @@ function HUD() {
           return (
             <button
               key={toolId}
-              onClick={() => setActiveTool(i)}
+              onClick={() => { setActiveTool(i); sfxToolSelect(); }}
               style={{
                 width: 48, height: 48,
                 border: selected ? '2px solid #55EFC4' : '2px solid transparent',
@@ -1720,7 +1881,7 @@ function HUD() {
         pointerEvents: 'auto',
       }}>
         <button
-          onClick={() => interact()}
+          onClick={() => { sfxClick(); interact(); }}
           style={{
             width: 56, height: 56, borderRadius: '50%',
             background: 'rgba(85,239,196,0.6)',
